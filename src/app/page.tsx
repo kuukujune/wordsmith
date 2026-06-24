@@ -118,51 +118,9 @@ export default function Home() {
           </div>
         </aside>
 
-        <section>
-          <form
-            onSubmit={handleSubmit}
-            className="mx-auto flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-300 bg-white px-4 py-2 shadow-sm"
-          >
-            <input
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Enter a word or phrase..."
-              className="min-w-0 flex-1 bg-transparent px-2 py-3 text-lg outline-none"
-            />
-
-            <button
-              type="submit"
-              className="rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white hover:bg-neutral-800"
-            >
-              Search
-            </button>
-          </form>
-
-          <div className="mx-auto mt-5 max-w-3xl">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-neutral-500">
-              Choose an association type
-            </p>
-
-            <div className="flex flex-wrap gap-3">
-              {relationTypes.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => setRelationType(type)}
-                  className={`rounded-lg border px-6 py-3 text-sm ${
-                    relationType === type
-                      ? "border-black bg-black text-white"
-                      : "border-neutral-300 bg-white hover:bg-neutral-100"
-                  }`}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="relative mx-auto mt-12 h-[520px] max-w-4xl">
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center text-3xl font-bold leading-tight">
+        <section className="flex min-h-[calc(100vh-190px)] flex-col">
+          <div className="relative mx-auto min-h-[430px] w-full max-w-4xl flex-1">
+            <div className="absolute left-1/2 top-1/2 max-w-[260px] -translate-x-1/2 -translate-y-1/2 text-center text-3xl font-bold leading-tight">
               {searchTerm || "Wordsmith"}
             </div>
 
@@ -193,6 +151,44 @@ export default function Home() {
               );
             })}
           </div>
+
+          <div className="mx-auto mt-4 w-full max-w-3xl">
+            <div className="flex flex-wrap justify-center gap-3">
+              {relationTypes.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setRelationType(type)}
+                  className={`rounded-lg border px-5 py-3 text-sm ${
+                    relationType === type
+                      ? "border-black bg-black text-white"
+                      : "border-neutral-300 bg-white hover:bg-neutral-100"
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <form
+            onSubmit={handleSubmit}
+            className="mx-auto mt-4 flex w-full max-w-3xl items-center gap-3 rounded-xl border border-neutral-300 bg-white px-4 py-2 shadow-sm"
+          >
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Enter a word or phrase..."
+              className="min-w-0 flex-1 bg-transparent px-2 py-3 text-lg outline-none"
+            />
+
+            <button
+              type="submit"
+              className="rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white hover:bg-neutral-800"
+            >
+              Search
+            </button>
+          </form>
         </section>
 
         <aside className="hidden rounded-xl border border-neutral-200 bg-white/70 p-5 lg:block">
