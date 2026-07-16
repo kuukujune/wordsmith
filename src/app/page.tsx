@@ -1,35 +1,1176 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import type { Core, EventObject, StylesheetJson } from "cytoscape";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
-const relationTypes = [
-  "Meaning",
-  "Rhymes",
-  "Sounds Like",
-  "Associated Phrases",
-  "Tone / Theme",
+const relationOptions = [
+  {
+    value: "meaning",
+    label: "Meaning",
+    helper: "Similar ideas",
+  },
+  {
+    value: "rhymes",
+    label: "Rhymes",
+    helper: "Matching sounds",
+  },
+  {
+    value: "sounds-like",
+    label: "Sounds Like",
+    helper: "Phonetic echoes",
+  },
+  {
+    value: "associated-phrases",
+    label: "Associated Phrases",
+    helper: "Related imagery",
+  },
+  {
+    value: "tone-theme",
+    label: "Tone / Theme",
+    helper: "Mood and feeling",
+  },
+] as const;
+
+type RelationType = (typeof relationOptions)[number]["value"];
+
+type WordNode = {
+  id: string;
+  label: string;
+  relationType?: RelationType;
+  definition: string;
+  example: string;
+  tone: string;
+  partOfSpeech: string;
+  strength: number;
+  source?: string;
+  parentId?: string;
+  depth?: number;
+};
+
+type GraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+};
+
+type WordSearchResponse = {
+  center: string;
+  relationType: RelationType;
+  nodes: WordNode[];
+  edges: GraphEdge[];
+  source: string;
+};
+
+type SavedWord = {
+  id: string;
+  word: string;
+  relationType: string;
+  centerWord: string;
+  definition: string;
+  example: string;
+  savedAt: string;
+};
+
+type SavedWeb = {
+  id: string;
+  title: string;
+  centerWord: string;
+  relationType: string;
+  source: string;
+  nodeCount: number;
+  nodes: Array<{
+    id: string;
+    label: string;
+    strength: number;
+    source?: string;
+  }>;
+  savedAt: string;
+};
+
+const savedWordsStorageKey = "wordsmith.savedWords";
+const savedWebsStorageKey = "wordsmith.savedWebs";
+const firstRingNodeCount = 8;
+const totalGraphNodeLimit = 50;
+const relatedNodeLimit = totalGraphNodeLimit - 1;
+const compactLayoutBreakpoint = 900;
+const desktopShellRows = "70px minmax(0, 1fr) 86px";
+const compactShellRows = "62px minmax(0, 1fr) 58px";
+const desktopWorkspaceColumns =
+  "216px minmax(0, 1fr) clamp(300px, 22vw, 360px)";
+const compactWorkspaceColumns = "minmax(0, 1fr)";
+const desktopWorkspaceRows = "minmax(0, 1fr)";
+const compactWorkspaceRows = "152px minmax(0, 1fr) 190px";
+const desktopGraphRows = "minmax(0, 1fr) 42px 58px";
+const compactGraphRows = "minmax(0, 1fr) 34px 52px";
+
+const fakeNodes: WordNode[] = [
+  {
+    id: "following-the-light",
+    label: "following the light",
+    definition: "Moving toward hope, clarity, or a better future.",
+    example: "Even after the setback, she kept following the light.",
+    tone: "Hopeful",
+    partOfSpeech: "Phrase",
+    strength: 96,
+  },
+  {
+    id: "new-beginnings",
+    label: "new beginnings",
+    definition: "Fresh starts or the beginning of a new stage.",
+    example: "The move felt like a season of new beginnings.",
+    tone: "Optimistic",
+    partOfSpeech: "Phrase",
+    strength: 94,
+  },
+  {
+    id: "morning-light",
+    label: "morning light",
+    definition: "Early light that suggests peace or renewal.",
+    example: "The morning light spilled across the quiet room.",
+    tone: "Gentle",
+    partOfSpeech: "Phrase",
+    strength: 92,
+  },
+  {
+    id: "pursuing-possibility",
+    label: "pursuing possibility",
+    definition: "Chasing what could happen instead of staying still.",
+    example: "He left home pursuing possibility.",
+    tone: "Aspirational",
+    partOfSpeech: "Phrase",
+    strength: 90,
+  },
+  {
+    id: "starting-over",
+    label: "starting over",
+    definition: "Beginning again after change, loss, or failure.",
+    example: "Starting over was scary, but it gave him freedom.",
+    tone: "Reflective",
+    partOfSpeech: "Phrase",
+    strength: 89,
+  },
+  {
+    id: "toward-something-better",
+    label: "toward something better",
+    definition: "Moving in the direction of improvement or hope.",
+    example: "Every choice pulled her toward something better.",
+    tone: "Hopeful",
+    partOfSpeech: "Phrase",
+    strength: 88,
+  },
+  {
+    id: "quiet-dawn",
+    label: "quiet dawn",
+    definition: "A calm early morning, often suggesting peace.",
+    example: "At quiet dawn, the city seemed almost forgiving.",
+    tone: "Peaceful",
+    partOfSpeech: "Phrase",
+    strength: 87,
+  },
+  {
+    id: "rising-again",
+    label: "rising again",
+    definition: "Recovering after difficulty or defeat.",
+    example: "After months of doubt, he was rising again.",
+    tone: "Resilient",
+    partOfSpeech: "Phrase",
+    strength: 86,
+  },
+  {
+    id: "chasing-daylight",
+    label: "chasing daylight",
+    definition: "Trying to reach hope, time, or opportunity.",
+    example: "They drove west, chasing daylight across the highway.",
+    tone: "Urgent",
+    partOfSpeech: "Phrase",
+    strength: 85,
+  },
+  {
+    id: "beyond-the-horizon",
+    label: "beyond the horizon",
+    definition: "Something unknown, distant, or full of possibility.",
+    example: "Her dreams waited somewhere beyond the horizon.",
+    tone: "Expansive",
+    partOfSpeech: "Phrase",
+    strength: 84,
+  },
+  {
+    id: "first-light",
+    label: "first light",
+    definition: "The earliest light of morning.",
+    example: "They reached the shore at first light.",
+    tone: "Clean",
+    partOfSpeech: "Phrase",
+    strength: 83,
+  },
+  {
+    id: "open-road",
+    label: "open road",
+    definition: "Freedom, movement, travel, or escape.",
+    example: "The open road made him feel possible again.",
+    tone: "Free",
+    partOfSpeech: "Phrase",
+    strength: 82,
+  },
+  {
+    id: "hope-in-motion",
+    label: "hope in motion",
+    definition: "Hope shown through action.",
+    example: "Her work was hope in motion.",
+    tone: "Inspirational",
+    partOfSpeech: "Phrase",
+    strength: 81,
+  },
+  {
+    id: "brighter-distance",
+    label: "brighter distance",
+    definition: "A future that seems better than the present.",
+    example: "He kept his eyes fixed on a brighter distance.",
+    tone: "Longing",
+    partOfSpeech: "Phrase",
+    strength: 80,
+  },
+  {
+    id: "golden-hour",
+    label: "golden hour",
+    definition: "A warm time near sunrise or sunset.",
+    example: "The golden hour made everything look forgiven.",
+    tone: "Warm",
+    partOfSpeech: "Phrase",
+    strength: 79,
+  },
+  {
+    id: "wake-the-dream",
+    label: "wake the dream",
+    definition: "To bring an old hope back to life.",
+    example: "The song seemed to wake the dream inside him.",
+    tone: "Creative",
+    partOfSpeech: "Phrase",
+    strength: 78,
+  },
+  {
+    id: "finding-clarity",
+    label: "finding clarity",
+    definition: "Beginning to understand something clearly.",
+    example: "After the conversation, she was finding clarity.",
+    tone: "Calm",
+    partOfSpeech: "Phrase",
+    strength: 77,
+  },
+  {
+    id: "light-through-clouds",
+    label: "light through clouds",
+    definition: "Hope appearing during difficulty.",
+    example: "His kindness was light through clouds.",
+    tone: "Tender",
+    partOfSpeech: "Phrase",
+    strength: 76,
+  },
+  {
+    id: "tomorrow-calling",
+    label: "tomorrow calling",
+    definition: "The feeling that the future is asking you forward.",
+    example: "She could hear tomorrow calling from the platform.",
+    tone: "Forward-looking",
+    partOfSpeech: "Phrase",
+    strength: 75,
+  },
+  {
+    id: "soft-arrival",
+    label: "soft arrival",
+    definition: "A gentle entrance into a new place or feeling.",
+    example: "The morning came as a soft arrival.",
+    tone: "Gentle",
+    partOfSpeech: "Phrase",
+    strength: 74,
+  },
+  {
+    id: "brave-morning",
+    label: "brave morning",
+    definition: "A new day faced with courage.",
+    example: "It was a brave morning after a sleepless night.",
+    tone: "Courageous",
+    partOfSpeech: "Phrase",
+    strength: 73,
+  },
+  {
+    id: "restless-hope",
+    label: "restless hope",
+    definition: "Hope that pushes someone to keep moving.",
+    example: "Restless hope kept him awake past midnight.",
+    tone: "Restless",
+    partOfSpeech: "Phrase",
+    strength: 72,
+  },
+  {
+    id: "sunlit-path",
+    label: "sunlit path",
+    definition: "A clear and hopeful direction forward.",
+    example: "For once, the choice looked like a sunlit path.",
+    tone: "Clear",
+    partOfSpeech: "Phrase",
+    strength: 71,
+  },
+  {
+    id: "faith-in-the-day",
+    label: "faith in the day",
+    definition: "Trust that the new day will bring something worthwhile.",
+    example: "She packed her bag with faith in the day.",
+    tone: "Faithful",
+    partOfSpeech: "Phrase",
+    strength: 70,
+  },
+  {
+    id: "edge-of-morning",
+    label: "edge of morning",
+    definition: "The border between night and day.",
+    example: "They spoke honestly at the edge of morning.",
+    tone: "Transitional",
+    partOfSpeech: "Phrase",
+    strength: 69,
+  },
+  {
+    id: "begin-again",
+    label: "begin again",
+    definition: "To restart with renewed effort or hope.",
+    example: "Tomorrow, he would begin again.",
+    tone: "Renewed",
+    partOfSpeech: "Phrase",
+    strength: 68,
+  },
+  {
+    id: "lifted-by-light",
+    label: "lifted by light",
+    definition: "Comforted or emotionally raised by hope.",
+    example: "She felt lifted by light after weeks of sadness.",
+    tone: "Comforted",
+    partOfSpeech: "Phrase",
+    strength: 67,
+  },
+  {
+    id: "after-the-dark",
+    label: "after the dark",
+    definition: "The time after hardship or sadness.",
+    example: "After the dark, even small joys felt enormous.",
+    tone: "Healing",
+    partOfSpeech: "Phrase",
+    strength: 66,
+  },
+  {
+    id: "promise-of-morning",
+    label: "promise of morning",
+    definition: "The hope suggested by a new day.",
+    example: "The promise of morning kept him going.",
+    tone: "Hopeful",
+    partOfSpeech: "Phrase",
+    strength: 65,
+  },
+  {
+    id: "reaching-for-dawn",
+    label: "reaching for dawn",
+    definition: "Trying to move toward relief or a new beginning.",
+    example: "All night, she felt like she was reaching for dawn.",
+    tone: "Yearning",
+    partOfSpeech: "Phrase",
+    strength: 64,
+  },
 ];
 
-const samplePhrases = [
-  "following the light to new places",
-  "seeking what's just beyond",
-  "driven by hope not by fear",
-  "finding peace in the quiet dawn",
-  "starting over with every sunrise",
-  "welcoming the new day",
-  "greeting the morning light",
-  "running toward something better",
-  "living for new beginnings",
-  "trusting the timing of life",
-  "new day, new reason to try",
-  "every sunrise is a reminder",
-];
+function normalizePhrase(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function createNodeId(centerPhrase: string, label: string, index: number) {
+  const slug = `${centerPhrase}-${label}-${index}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+  return slug || `node-${index}`;
+}
+
+function createFakeNode(
+  centerPhrase: string,
+  label: string,
+  index: number,
+  parentId = "center",
+  depth = 1
+): WordNode {
+  const tones = [
+    "Reflective",
+    "Hopeful",
+    "Gentle",
+    "Searching",
+    "Aspirational",
+    "Grounded",
+  ];
+
+  return {
+    id: createNodeId(centerPhrase, label, index),
+    label,
+    definition: `A phrase connected to "${centerPhrase}" for this fake MVP exploration set.`,
+    example: `She wrote "${label}" beside "${centerPhrase}" while looking for a better line.`,
+    tone: tones[index % tones.length],
+    partOfSpeech: "Phrase",
+    strength: Math.max(62, 98 - index),
+    parentId,
+    depth,
+  };
+}
+
+function buildFakeRelatedNodes(centerPhrase: string, relationType: RelationType) {
+  const meaningTemplates = [
+    "the heart of {word}",
+    "what {word} is reaching for",
+    "{word} in another light",
+    "the quiet meaning of {word}",
+    "{word} beneath the surface",
+    "the feeling inside {word}",
+    "a softer version of {word}",
+    "the promise behind {word}",
+    "{word} made plain",
+    "the ache inside {word}",
+  ];
+
+  const rhymeTemplates = [
+    "{word} in time",
+    "{word} in rhyme",
+    "{word} by design",
+    "{word} on the line",
+    "{word} made mine",
+    "{word} and shine",
+    "{word} through the vine",
+    "{word} as a sign",
+    "{word} past decline",
+    "{word} in fine outline",
+  ];
+
+  const soundTemplates = [
+    "echoes of {word}",
+    "{word} whispered differently",
+    "near-sound of {word}",
+    "{word} with a softer edge",
+    "{word} in another voice",
+    "almost saying {word}",
+    "{word} with a turn",
+    "the sound beside {word}",
+    "{word} rephrased aloud",
+    "a close call to {word}",
+  ];
+
+  const associatedTemplates = [
+    "{word} and the road ahead",
+    "{word} in the margin",
+    "{word} after midnight",
+    "{word} with open hands",
+    "{word} beside the window",
+    "{word} at first light",
+    "{word} before the answer",
+    "{word} on a blank page",
+    "{word} with a second chance",
+    "{word} moving forward",
+  ];
+
+  const toneTemplates = [
+    "{word} but hopeful",
+    "{word} but tender",
+    "{word} but restless",
+    "{word} but bright",
+    "{word} but uncertain",
+    "{word} but brave",
+    "{word} but calm",
+    "{word} but urgent",
+    "{word} but forgiving",
+    "{word} but alive",
+  ];
+
+  const templatesByRelation: Record<RelationType, string[]> = {
+    meaning: meaningTemplates,
+    rhymes: rhymeTemplates,
+    "sounds-like": soundTemplates,
+    "associated-phrases": associatedTemplates,
+    "tone-theme": toneTemplates,
+  };
+
+  const templates = templatesByRelation[relationType];
+  const labels = Array.from({ length: relatedNodeLimit }, (_, index) => {
+    const template = templates[index % templates.length];
+    const cycle = Math.floor(index / templates.length);
+    const suffixes = ["", " again", " unfolding", " remembered", " returning"];
+
+    return `${template.replace("{word}", centerPhrase)}${suffixes[cycle]}`;
+  });
+
+  const sourceNodes =
+    normalizePhrase(centerPhrase) === "chasing the sunrise"
+      ? fakeNodes
+      : labels.map((label, index) => createFakeNode(centerPhrase, label, index));
+
+  const firstRingNodes = [...sourceNodes]
+    .sort((first, second) => second.strength - first.strength)
+    .slice(0, firstRingNodeCount)
+    .map((node, index) => ({
+      ...node,
+      id: createNodeId(centerPhrase, node.label, index),
+      parentId: "center",
+      depth: 1,
+    }));
+  const nodes: WordNode[] = [...firstRingNodes];
+  const remainingNodeSlots = relatedNodeLimit - firstRingNodes.length;
+  const baseChildCount = Math.floor(
+    remainingNodeSlots / Math.max(firstRingNodes.length, 1)
+  );
+  let extraChildSlots = remainingNodeSlots % Math.max(firstRingNodes.length, 1);
+
+  firstRingNodes.forEach((parentNode, parentIndex) => {
+    const childLimit = baseChildCount + (extraChildSlots > 0 ? 1 : 0);
+    extraChildSlots = Math.max(0, extraChildSlots - 1);
+
+    Array.from({ length: childLimit }, (_, childIndex) => {
+      const template = templates[(parentIndex + childIndex) % templates.length];
+      const label = template.replace("{word}", parentNode.label);
+      const nodeIndex = nodes.length;
+
+      nodes.push(
+        createFakeNode(
+          parentNode.label,
+          label,
+          nodeIndex,
+          parentNode.id,
+          2
+        )
+      );
+    });
+  });
+
+  return nodes.slice(0, relatedNodeLimit);
+}
+
+function buildEdgesFromNodes(nodes: WordNode[]) {
+  return nodes.map((node) => {
+    const source = node.parentId ?? "center";
+
+    return {
+      id: `edge-${source}-${node.id}`,
+      source,
+      target: node.id,
+    };
+  });
+}
+
+type NodeTextStyle = {
+  fontSize: number;
+  textMaxWidth: number;
+  textMarginY: number;
+};
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function estimateLabelBox(
+  label: string,
+  options: {
+    fontSize?: number;
+    isCenter?: boolean;
+    maxWidth?: number;
+  } = {}
+) {
+  const isCenter = options.isCenter ?? false;
+  const fontSize = options.fontSize ?? (isCenter ? 54 : 24);
+  const maxWidth = options.maxWidth ?? (isCenter ? 420 : 250);
+  const averageCharacterWidth = fontSize * 0.54;
+  const lineHeight = fontSize * 1.25;
+  const estimatedWidth = Math.min(
+    maxWidth,
+    Math.max(isCenter ? 150 : 72, label.length * averageCharacterWidth)
+  );
+  const lineCount = Math.max(
+    1,
+    Math.ceil((label.length * averageCharacterWidth) / maxWidth)
+  );
+
+  return {
+    width: estimatedWidth + 20,
+    height: lineCount * lineHeight + 16,
+    radius: Math.max(estimatedWidth / 2, (lineCount * lineHeight) / 2) + 14,
+  };
+}
+
+function createSpiderWebLayout(centerPhrase: string, nodes: WordNode[]) {
+  const centerX = 520;
+  const centerY = 390;
+  const positions: Record<string, { x: number; y: number }> = {
+    center: {
+      x: centerX,
+      y: centerY,
+    },
+  };
+  const boxes = new Map<string, ReturnType<typeof estimateLabelBox>>();
+  const centerBox = estimateLabelBox(centerPhrase, { isCenter: true });
+  boxes.set("center", centerBox);
+
+  nodes.forEach((node) => {
+    boxes.set(node.id, estimateLabelBox(node.label));
+  });
+
+  const firstRingNodes = nodes
+    .filter((node) => (node.parentId ?? "center") === "center")
+    .sort((first, second) => second.strength - first.strength)
+    .slice(0, firstRingNodeCount);
+  const maxFirstRingLabelRadius = Math.max(
+    70,
+    ...firstRingNodes.map((node) => boxes.get(node.id)?.radius ?? 70)
+  );
+  const firstRingRadius = Math.max(
+    210,
+    centerBox.radius + maxFirstRingLabelRadius + 78
+  );
+
+  firstRingNodes.forEach((node, index) => {
+    const angle = (2 * Math.PI * index) / Math.max(firstRingNodes.length, 1) - Math.PI / 2;
+
+    positions[node.id] = {
+      x: centerX + Math.cos(angle) * firstRingRadius,
+      y: centerY + Math.sin(angle) * firstRingRadius,
+    };
+
+    const childNodes = nodes
+      .filter((childNode) => childNode.parentId === node.id)
+      .sort((first, second) => second.strength - first.strength);
+    const childSpread = Math.min(1.12, 0.34 + childNodes.length * 0.12);
+
+    childNodes.forEach((childNode, childIndex) => {
+      const childBox = boxes.get(childNode.id) ?? estimateLabelBox(childNode.label);
+      const offset =
+        childNodes.length === 1
+          ? 0
+          : (childIndex / (childNodes.length - 1) - 0.5) * childSpread;
+      const childAngle = angle + offset;
+      const childRadius =
+        firstRingRadius +
+        118 +
+        (childIndex % 3) * 44 +
+        Math.min(64, childBox.width * 0.16);
+
+      positions[childNode.id] = {
+        x: centerX + Math.cos(childAngle) * childRadius,
+        y: centerY + Math.sin(childAngle) * childRadius,
+      };
+    });
+  });
+
+  const movableNodes = nodes.filter((node) => positions[node.id]);
+
+  for (let iteration = 0; iteration < 110; iteration += 1) {
+    for (let firstIndex = 0; firstIndex < movableNodes.length; firstIndex += 1) {
+      for (
+        let secondIndex = firstIndex + 1;
+        secondIndex < movableNodes.length;
+        secondIndex += 1
+      ) {
+        const firstNode = movableNodes[firstIndex];
+        const secondNode = movableNodes[secondIndex];
+        const firstPosition = positions[firstNode.id];
+        const secondPosition = positions[secondNode.id];
+        const firstRadius = boxes.get(firstNode.id)?.radius ?? 70;
+        const secondRadius = boxes.get(secondNode.id)?.radius ?? 70;
+        const minimumDistance = firstRadius + secondRadius + 10;
+        const xDistance = secondPosition.x - firstPosition.x;
+        const yDistance = secondPosition.y - firstPosition.y;
+        const actualDistance = Math.hypot(xDistance, yDistance) || 1;
+
+        if (actualDistance >= minimumDistance) {
+          continue;
+        }
+
+        const pushDistance = (minimumDistance - actualDistance) / 2;
+        const xPush = (xDistance / actualDistance) * pushDistance;
+        const yPush = (yDistance / actualDistance) * pushDistance;
+
+        firstPosition.x -= xPush;
+        firstPosition.y -= yPush;
+        secondPosition.x += xPush;
+        secondPosition.y += yPush;
+      }
+    }
+  }
+
+  return positions;
+}
+
+function createReadableTextStyles(
+  centerPhrase: string,
+  nodes: WordNode[],
+  positions: Record<string, { x: number; y: number }>
+) {
+  const allNodes = [
+    {
+      id: "center",
+      label: centerPhrase,
+      depth: 0,
+    },
+    ...nodes,
+  ];
+  const textStyles: Record<string, NodeTextStyle> = {};
+
+  allNodes.forEach((node) => {
+    const position = positions[node.id];
+
+    if (!position) {
+      return;
+    }
+
+    let nearestDistance = Infinity;
+
+    allNodes.forEach((otherNode) => {
+      if (otherNode.id === node.id) {
+        return;
+      }
+
+      const otherPosition = positions[otherNode.id];
+
+      if (!otherPosition) {
+        return;
+      }
+
+      nearestDistance = Math.min(
+        nearestDistance,
+        Math.hypot(otherPosition.x - position.x, otherPosition.y - position.y)
+      );
+    });
+
+    const depth = node.depth ?? 2;
+    const fontSize = depth === 0 ? 58 : depth === 1 ? 28 : 23;
+    const preferredWidth = node.label.length * fontSize * 0.72;
+    const maximumWidth = depth === 0 ? 460 : depth === 1 ? 360 : 300;
+    const minimumWidth = depth === 0 ? 260 : depth === 1 ? 170 : 145;
+    const openSpaceWidth = Number.isFinite(nearestDistance)
+      ? nearestDistance * 0.78
+      : maximumWidth;
+    const textMaxWidth = Math.round(
+      clamp(preferredWidth, minimumWidth, Math.min(maximumWidth, openSpaceWidth))
+    );
+
+    textStyles[node.id] = {
+      fontSize,
+      textMaxWidth,
+      textMarginY: depth === 0 ? 0 : -Math.round(fontSize * 0.9),
+    };
+  });
+
+  return textStyles;
+}
+
+type ResizableCore = Core & {
+  wordsmithResizeHandler?: () => void;
+};
+
+type CytoscapeNodeEvent = EventObject & {
+  target: {
+    id: () => string;
+  };
+};
+
+const graphStylesheet = [
+  {
+    selector: "node",
+    style: {
+      label: "data(label)",
+      color: "#111111",
+      "background-color": "#111111",
+      "text-events": "yes",
+      width: 7,
+      height: 7,
+      "font-size": "data(fontSize)",
+      "font-family": "Arial, sans-serif",
+      "text-wrap": "wrap",
+      "text-max-width": "data(textMaxWidth)",
+      "text-valign": "top",
+      "text-halign": "center",
+      "text-margin-y": "data(textMarginY)",
+      "overlay-opacity": 0,
+    },
+  },
+  {
+    selector: ".center-node",
+    style: {
+      label: "data(label)",
+      "background-opacity": 0,
+      "text-events": "yes",
+      width: 1,
+      height: 1,
+      "font-size": "data(fontSize)",
+      "font-weight": 700,
+      "text-valign": "center",
+      "text-halign": "center",
+      "text-wrap": "wrap",
+      "text-max-width": "data(textMaxWidth)",
+      "text-margin-y": "data(textMarginY)",
+    },
+  },
+  {
+    selector: "edge",
+    style: {
+      width: 1,
+      "line-color": "#222222",
+      opacity: 0.36,
+      "curve-style": "straight",
+    },
+  },
+  {
+    selector: ".first-ring-node",
+    style: {
+      width: 8,
+      height: 8,
+      "font-weight": 600,
+    },
+  },
+  {
+    selector: ".branch-node",
+    style: {
+      width: 6,
+      height: 6,
+      opacity: 0.92,
+    },
+  },
+  {
+    selector: ".selected-node",
+    style: {
+      "background-color": "#000000",
+      color: "#000000",
+      width: 13,
+      height: 13,
+      "font-weight": 700,
+    },
+  },
+  {
+    selector: "node:active",
+    style: {
+      "overlay-color": "#000000",
+      "overlay-opacity": 0.08,
+      "overlay-padding": 12,
+    },
+  },
+] as unknown as StylesheetJson;
 
 export default function Home() {
-  const [searchTerm, setSearchTerm] = useState("chasing the sunrise");
-  const [relationType, setRelationType] = useState("Meaning");
+  const graphContainerRef = useRef<HTMLDivElement | null>(null);
+  const cyRef = useRef<ResizableCore | null>(null);
+  const currentNodesRef = useRef<WordNode[]>([]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const [searchTerm, setSearchTerm] = useState("chasing the sunrise");
+  const [centerPhrase, setCenterPhrase] = useState("chasing the sunrise");
+  const [relationType, setRelationType] = useState<RelationType>("meaning");
+  const [selectedNode, setSelectedNode] = useState<WordNode | null>(null);
+  const [recenterMessage, setRecenterMessage] = useState("");
+  const [liveGraph, setLiveGraph] = useState<WordSearchResponse | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [webSaveMessage, setWebSaveMessage] = useState("");
+  const [isCompactLayout, setIsCompactLayout] = useState(false);
+  const [savedWords, setSavedWords] = useState<SavedWord[]>(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+
+    const storedWords = window.localStorage.getItem(savedWordsStorageKey);
+
+    if (!storedWords) {
+      return [];
+    }
+
+    try {
+      const parsedWords = JSON.parse(storedWords) as SavedWord[];
+      return Array.isArray(parsedWords) ? parsedWords : [];
+    } catch {
+      window.localStorage.removeItem(savedWordsStorageKey);
+      return [];
+    }
+  });
+  const [savedWebs, setSavedWebs] = useState<SavedWeb[]>(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+
+    const storedWebs = window.localStorage.getItem(savedWebsStorageKey);
+
+    if (!storedWebs) {
+      return [];
+    }
+
+    try {
+      const parsedWebs = JSON.parse(storedWebs) as SavedWeb[];
+      return Array.isArray(parsedWebs) ? parsedWebs : [];
+    } catch {
+      window.localStorage.removeItem(savedWebsStorageKey);
+      return [];
+    }
+  });
+  const [saveMessage, setSaveMessage] = useState("");
+
+  const selectedRelation =
+    relationOptions.find((option) => option.value === relationType) ??
+    relationOptions[0];
+
+  const isSelectedNodeSaved = selectedNode
+    ? savedWords.some((savedWord) => savedWord.id === selectedNode.id)
+    : false;
+
+  const isShowingLiveGraph =
+    liveGraph !== null &&
+    normalizePhrase(liveGraph.center) === normalizePhrase(centerPhrase) &&
+    liveGraph.relationType === relationType;
+
+  const graphSourceLabel = isShowingLiveGraph ? "Datamuse" : "Fake MVP data";
+  const shellRows = isCompactLayout ? compactShellRows : desktopShellRows;
+  const workspaceColumns = isCompactLayout
+    ? compactWorkspaceColumns
+    : desktopWorkspaceColumns;
+  const workspaceRows = isCompactLayout
+    ? compactWorkspaceRows
+    : desktopWorkspaceRows;
+  const graphRows = isCompactLayout ? compactGraphRows : desktopGraphRows;
+  const footerColumns = isCompactLayout
+    ? "minmax(0, 1fr) auto"
+    : workspaceColumns;
+
+  const currentNodes = useMemo(() => {
+    return isShowingLiveGraph && liveGraph
+      ? liveGraph.nodes
+      : buildFakeRelatedNodes(centerPhrase, relationType);
+  }, [centerPhrase, isShowingLiveGraph, liveGraph, relationType]);
+  const currentEdges = useMemo(() => {
+    return isShowingLiveGraph && liveGraph
+      ? liveGraph.edges
+      : buildEdgesFromNodes(currentNodes);
+  }, [currentNodes, isShowingLiveGraph, liveGraph]);
+
+  useEffect(() => {
+    currentNodesRef.current = currentNodes;
+  }, [currentNodes]);
+
+  useEffect(() => {
+    function updateLayoutMode() {
+      setIsCompactLayout(window.innerWidth <= compactLayoutBreakpoint);
+    }
+
+    updateLayoutMode();
+    window.addEventListener("resize", updateLayoutMode);
+
+    return () => window.removeEventListener("resize", updateLayoutMode);
+  }, []);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const previousHtmlOverflow = html.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+    const previousHtmlHeight = html.style.height;
+    const previousBodyHeight = body.style.height;
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    html.style.height = "100%";
+    body.style.height = "100%";
+
+    return () => {
+      html.style.overflow = previousHtmlOverflow;
+      body.style.overflow = previousBodyOverflow;
+      html.style.height = previousHtmlHeight;
+      body.style.height = previousBodyHeight;
+    };
+  }, []);
+
+  const graphElements = useMemo(() => {
+    const layoutPositions = createSpiderWebLayout(centerPhrase, currentNodes);
+    const textStyles = createReadableTextStyles(
+      centerPhrase,
+      currentNodes,
+      layoutPositions
+    );
+    const centerTextStyle = textStyles.center ?? {
+      fontSize: 40,
+      textMaxWidth: 340,
+      textMarginY: 0,
+    };
+
+    const centerNode = {
+      data: {
+        id: "center",
+        label: centerPhrase,
+        fontSize: centerTextStyle.fontSize,
+        textMaxWidth: centerTextStyle.textMaxWidth,
+        textMarginY: centerTextStyle.textMarginY,
+      },
+      position: layoutPositions.center,
+      classes: "center-node",
+    };
+
+    const outerNodes = currentNodes.map((node) => {
+      const textStyle = textStyles[node.id] ?? {
+        fontSize: node.depth === 1 ? 18 : 16,
+        textMaxWidth: node.depth === 1 ? 190 : 160,
+        textMarginY: -22,
+      };
+
+      return {
+        data: {
+          id: node.id,
+          label: node.label,
+          parentId: node.parentId,
+          depth: node.depth,
+          strength: node.strength,
+          fontSize: textStyle.fontSize,
+          textMaxWidth: textStyle.textMaxWidth,
+          textMarginY: textStyle.textMarginY,
+        },
+        position: layoutPositions[node.id],
+        classes:
+          node.depth === 1
+            ? "word-node first-ring-node"
+            : "word-node branch-node",
+      };
+    });
+
+    const edges = currentEdges.map((edge) => ({
+      data: {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+      },
+    }));
+
+    return [centerNode, ...outerNodes, ...edges];
+  }, [centerPhrase, currentEdges, currentNodes]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function createOrUpdateGraph() {
+      if (!graphContainerRef.current) {
+        return;
+      }
+
+      const cytoscapeModule = await import("cytoscape");
+      const cytoscape = cytoscapeModule.default;
+
+      if (cancelled) {
+        return;
+      }
+
+      if (!cyRef.current) {
+        const cy = cytoscape({
+          container: graphContainerRef.current,
+          elements: graphElements,
+          style: graphStylesheet,
+          layout: {
+            name: "preset",
+            fit: true,
+            padding: 12,
+          },
+          minZoom: 0.35,
+          maxZoom: 3,
+          userPanningEnabled: true,
+          userZoomingEnabled: true,
+          boxSelectionEnabled: false,
+        }) as ResizableCore;
+
+        cyRef.current = cy;
+
+        const resizeGraph = () => {
+          cy.resize();
+          cy.fit(undefined, 10);
+        };
+
+        window.requestAnimationFrame(resizeGraph);
+        window.addEventListener("resize", resizeGraph);
+        cy.wordsmithResizeHandler = resizeGraph;
+
+        cy.on("tap", "node", (event: CytoscapeNodeEvent) => {
+          const clickedNodeId = event.target.id();
+
+          if (clickedNodeId === "center") {
+            setSelectedNode(null);
+            setSaveMessage("");
+            return;
+          }
+
+          const clickedNode = currentNodesRef.current.find(
+            (node) => node.id === clickedNodeId
+          );
+
+          if (clickedNode) {
+            setSelectedNode(clickedNode);
+            setSaveMessage("");
+          }
+        });
+
+        return;
+      }
+
+      const cy = cyRef.current;
+
+      cy.elements().remove();
+      cy.add(graphElements);
+      cy.style(graphStylesheet);
+      cy.layout({
+        name: "preset",
+        fit: true,
+        padding: 12,
+      }).run();
+      cy.fit(undefined, 10);
+    }
+
+    createOrUpdateGraph();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [graphElements]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+
+    if (!cy) {
+      return;
+    }
+
+    cy.nodes().removeClass("selected-node");
+
+    if (selectedNode) {
+      cy.getElementById(selectedNode.id).addClass("selected-node");
+    }
+  }, [selectedNode]);
+
+  useEffect(() => {
+    return () => {
+      if (cyRef.current) {
+        if (cyRef.current.wordsmithResizeHandler) {
+          window.removeEventListener(
+            "resize",
+            cyRef.current.wordsmithResizeHandler
+          );
+        }
+        cyRef.current.destroy();
+        cyRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      savedWordsStorageKey,
+      JSON.stringify(savedWords)
+    );
+  }, [savedWords]);
+
+  useEffect(() => {
+    window.localStorage.setItem(savedWebsStorageKey, JSON.stringify(savedWebs));
+  }, [savedWebs]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const cleanedSearchTerm = searchTerm.trim();
@@ -39,26 +1180,197 @@ export default function Home() {
       return;
     }
 
-    alert(`Search: ${cleanedSearchTerm}\nRelation type: ${relationType}`);
+    setIsSearching(true);
+    setSearchError("");
+    setRecenterMessage("");
+    setSaveMessage("");
+    setWebSaveMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/word-search?word=${encodeURIComponent(
+          cleanedSearchTerm
+        )}&relationType=${encodeURIComponent(relationType)}`
+      );
+      const graph = (await response.json()) as
+        | WordSearchResponse
+        | { error?: string };
+
+      if (!response.ok || !("nodes" in graph)) {
+        const errorMessage = "error" in graph ? graph.error : undefined;
+        throw new Error(errorMessage || "Search failed.");
+      }
+
+      setCenterPhrase(graph.center);
+      setLiveGraph(graph);
+      setSelectedNode(null);
+    } catch (error) {
+      setCenterPhrase(cleanedSearchTerm);
+      setLiveGraph(null);
+      setSelectedNode(null);
+      setSearchError(
+        error instanceof Error
+          ? `${error.message} Showing fake MVP results instead.`
+          : "Search failed. Showing fake MVP results instead."
+      );
+    } finally {
+      setIsSearching(false);
+    }
+  }
+
+  function chooseRelationType(type: RelationType) {
+    setRelationType(type);
+    setLiveGraph(null);
+    setSelectedNode(null);
+    setSearchError("");
+    setRecenterMessage("");
+    setSaveMessage("");
+    setWebSaveMessage("");
+  }
+
+  function zoomIn() {
+    const cy = cyRef.current;
+
+    if (!cy) {
+      return;
+    }
+
+    cy.zoom({
+      level: Math.min(cy.zoom() * 1.25, 3),
+      renderedPosition: {
+        x: cy.width() / 2,
+        y: cy.height() / 2,
+      },
+    });
+  }
+
+  function zoomOut() {
+    const cy = cyRef.current;
+
+    if (!cy) {
+      return;
+    }
+
+    cy.zoom({
+      level: Math.max(cy.zoom() / 1.25, 0.35),
+      renderedPosition: {
+        x: cy.width() / 2,
+        y: cy.height() / 2,
+      },
+    });
+  }
+
+  function resetView() {
+    const cy = cyRef.current;
+
+    if (!cy) {
+      return;
+    }
+
+    cy.fit(undefined, 10);
+  }
+
+  function recenterSelectedNode() {
+    if (!selectedNode) {
+      return;
+    }
+
+    const previousCenterPhrase = centerPhrase;
+
+    setCenterPhrase(selectedNode.label);
+    setSearchTerm(selectedNode.label);
+    setLiveGraph(null);
+    setSelectedNode(null);
+    setSearchError("");
+    setRecenterMessage(
+      `Re-centered from "${previousCenterPhrase}" to "${selectedNode.label}".`
+    );
+    setSaveMessage("");
+    setWebSaveMessage("");
+  }
+
+  function saveSelectedNode() {
+    if (!selectedNode) {
+      return;
+    }
+
+    const savedWord: SavedWord = {
+      id: selectedNode.id,
+      word: selectedNode.label,
+      relationType: selectedRelation.label,
+      centerWord: centerPhrase,
+      definition: selectedNode.definition,
+      example: selectedNode.example,
+      savedAt: new Date().toISOString(),
+    };
+
+    setSavedWords((currentSavedWords) => {
+      const withoutDuplicate = currentSavedWords.filter(
+        (currentSavedWord) => currentSavedWord.id !== savedWord.id
+      );
+
+      return [savedWord, ...withoutDuplicate];
+    });
+    setSaveMessage(`Saved "${selectedNode.label}" locally.`);
+  }
+
+  function saveCurrentWeb() {
+    const savedWeb: SavedWeb = {
+      id: `${normalizePhrase(centerPhrase)}-${relationType}`,
+      title: `${centerPhrase} - ${selectedRelation.label}`,
+      centerWord: centerPhrase,
+      relationType: selectedRelation.label,
+      source: graphSourceLabel,
+      nodeCount: currentNodes.length + 1,
+      nodes: currentNodes.map((node) => ({
+        id: node.id,
+        label: node.label,
+        strength: node.strength,
+        source: node.source,
+      })),
+      savedAt: new Date().toISOString(),
+    };
+
+    setSavedWebs((currentSavedWebs) => {
+      const withoutDuplicate = currentSavedWebs.filter(
+        (currentSavedWeb) => currentSavedWeb.id !== savedWeb.id
+      );
+
+      return [savedWeb, ...withoutDuplicate];
+    });
+    setWebSaveMessage(`Saved "${centerPhrase}" web locally.`);
   }
 
   return (
-    <main className="min-h-screen bg-[#f8f7f2] text-black">
-      <header className="flex items-center justify-between border-b border-neutral-200 px-8 py-4">
-        <div>
-          <h1 className="font-serif text-3xl tracking-wide">WORDSMITH</h1>
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">
-            Explore. Connect. Express.
-          </p>
+    <main
+      className="wordsmith-shell fixed inset-0 grid overflow-hidden bg-[#f9f8f4] text-black"
+      style={{
+        height: "100dvh",
+        gridTemplateRows: shellRows,
+      }}
+    >
+      <header
+        className="wordsmith-header z-30 flex min-h-0 items-center justify-between border-b border-neutral-200 bg-[#f9f8f4] px-6"
+      >
+        <div className="flex min-w-[230px] items-center gap-3">
+          <div className="text-3xl leading-none">/</div>
+          <div>
+            <h1 className="font-serif text-3xl leading-none tracking-wide">
+              WORDSMITH
+            </h1>
+            <p className="mt-1 text-[10px] uppercase tracking-[0.28em] text-neutral-500">
+              Explore. Connect. Express.
+            </p>
+          </div>
         </div>
 
         <nav className="hidden gap-10 text-sm md:flex">
-          <a className="border-b-2 border-black pb-2" href="#">
+          <Link className="border-b-2 border-black pb-2" href="/">
             Explore
-          </a>
-          <a className="text-neutral-500" href="#">
+          </Link>
+          <Link className="text-neutral-500" href="/wordbank">
             Saved
-          </a>
+          </Link>
           <a className="text-neutral-500" href="#">
             Lists
           </a>
@@ -67,105 +1379,156 @@ export default function Home() {
           </a>
         </nav>
 
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black font-bold text-white">
-          W
+        <div className="flex min-w-[230px] items-center justify-end gap-6 text-xl">
+          <button type="button" title="Theme" className="leading-none">
+            *
+          </button>
+          <button type="button" title="Help" className="text-base leading-none">
+            ?
+          </button>
+          <button type="button" title="Notifications" className="leading-none">
+            !
+          </button>
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black font-bold text-white">
+            W
+          </div>
         </div>
       </header>
 
-      <div className="grid gap-6 px-6 py-6 lg:grid-cols-[240px_1fr_280px]">
-        <aside className="hidden rounded-xl border border-neutral-200 bg-white/70 p-4 lg:block">
-          <h2 className="mb-4 text-xs font-bold uppercase tracking-widest">
+      <div
+        className="wordsmith-workspace mx-auto grid min-h-0 w-full max-w-[1540px] gap-5 overflow-hidden px-6 py-2"
+        style={{
+          gridTemplateColumns: workspaceColumns,
+          gridTemplateRows: workspaceRows,
+        }}
+      >
+        <aside className="wordsmith-settings-panel min-h-0 overflow-hidden rounded-lg border border-neutral-200 bg-white/62 p-4 shadow-sm">
+          <h2 className="mb-3 text-xs font-bold uppercase tracking-widest">
             Relation Types
           </h2>
 
-          <div className="space-y-2">
-            {relationTypes.map((type) => (
+          <div className="space-y-1.5">
+            {relationOptions.map((option) => (
               <button
-                key={type}
+                key={option.value}
                 type="button"
-                onClick={() => setRelationType(type)}
-                className={`w-full rounded-lg px-4 py-3 text-left text-sm ${
-                  relationType === type
+                onClick={() => chooseRelationType(option.value)}
+                className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${
+                  relationType === option.value
                     ? "bg-neutral-200 font-semibold"
                     : "hover:bg-neutral-100"
                 }`}
               >
-                {type}
+                <span className="block">{option.label}</span>
               </button>
             ))}
           </div>
 
-          <div className="mt-8 border-t border-neutral-200 pt-4">
-            <h2 className="mb-4 text-xs font-bold uppercase tracking-widest">
+          <div className="mt-4 border-t border-neutral-200 pt-4">
+            <h2 className="mb-3 text-xs font-bold uppercase tracking-widest">
               Filters
             </h2>
 
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between rounded-md border border-neutral-200 px-3 py-2">
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between rounded-md border border-neutral-200 px-3 py-2 text-xs">
                 <span>Part of Speech</span>
                 <span>All</span>
               </div>
 
-              <div className="flex justify-between rounded-md border border-neutral-200 px-3 py-2">
+              <div className="flex justify-between rounded-md border border-neutral-200 px-3 py-2 text-xs">
                 <span>Tone</span>
                 <span>All</span>
               </div>
 
-              <button className="w-full rounded-md border border-neutral-300 px-3 py-2">
+              <div>
+                <p className="mb-2">Intensity</p>
+                <div className="h-1 rounded-full bg-neutral-300">
+                  <div className="h-1 w-1/2 rounded-full bg-black" />
+                </div>
+                <div className="mt-2 flex justify-between text-xs text-neutral-500">
+                  <span>Low</span>
+                  <span>High</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-100"
+              >
                 Reset Filters
               </button>
             </div>
           </div>
+
+          <div className="short-screen-hide mt-4 rounded-lg border border-neutral-200 bg-white/70 p-3 text-sm">
+            <p className="mb-1 font-bold">Tip</p>
+            <p className="text-neutral-600">
+              Click a dot or its text label to open phrase details.
+            </p>
+          </div>
         </aside>
 
-        <section className="flex min-h-[calc(100vh-190px)] flex-col">
-          <div className="relative mx-auto min-h-[430px] w-full max-w-4xl flex-1">
-            <div className="absolute left-1/2 top-1/2 max-w-[260px] -translate-x-1/2 -translate-y-1/2 text-center text-3xl font-bold leading-tight">
-              {searchTerm || "Wordsmith"}
+        <section
+          className="wordsmith-graph-panel relative grid min-h-0 min-w-0 overflow-hidden"
+          style={{ gridTemplateRows: graphRows }}
+        >
+          <div className="pointer-events-none absolute inset-0 opacity-45 [background-image:radial-gradient(circle_at_center,#000_1.4px,transparent_1.5px)] [background-size:98px_78px]" />
+
+          <div className="relative min-h-0 overflow-hidden">
+            <div
+              ref={graphContainerRef}
+              data-wordsmith-graph
+              className="absolute inset-0 h-full min-h-[280px] w-full"
+            />
+
+            <div className="absolute bottom-0 left-0 z-20 flex flex-col overflow-hidden rounded-lg border border-neutral-300 bg-white/85 shadow-sm">
+              <button
+                type="button"
+                onClick={zoomIn}
+                className="h-10 w-10 border-b border-neutral-300 text-2xl leading-none hover:bg-neutral-100"
+                title="Zoom in"
+              >
+                +
+              </button>
+
+              <button
+                type="button"
+                onClick={zoomOut}
+                className="h-10 w-10 border-b border-neutral-300 text-2xl leading-none hover:bg-neutral-100"
+                title="Zoom out"
+              >
+                -
+              </button>
+
+              <button
+                type="button"
+                onClick={resetView}
+                className="h-10 w-10 text-lg leading-none hover:bg-neutral-100"
+                title="Reset view"
+              >
+                []
+              </button>
             </div>
-
-            {samplePhrases.map((phrase, index) => {
-              const positions = [
-                "left-[8%] top-[18%]",
-                "left-[25%] top-[8%]",
-                "left-[2%] top-[45%]",
-                "left-[18%] top-[62%]",
-                "left-[28%] top-[78%]",
-                "left-[48%] top-[5%]",
-                "left-[50%] top-[28%]",
-                "right-[15%] top-[18%]",
-                "right-[5%] top-[45%]",
-                "right-[15%] top-[72%]",
-                "right-[28%] bottom-[5%]",
-                "left-[38%] bottom-[8%]",
-              ];
-
-              return (
-                <div
-                  key={phrase}
-                  className={`absolute max-w-[170px] text-center text-sm ${positions[index]}`}
-                >
-                  <div className="mx-auto mb-2 h-px w-16 bg-black" />
-                  <p>{phrase}</p>
-                </div>
-              );
-            })}
           </div>
 
-          <div className="mx-auto mt-4 w-full max-w-3xl">
-            <div className="flex flex-wrap justify-center gap-3">
-              {relationTypes.map((type) => (
+          <div className="flex min-h-0 items-end justify-center gap-2 overflow-hidden">
+            <p className="mr-2 hidden text-[11px] font-semibold uppercase tracking-widest text-neutral-500 2xl:block">
+              Choose an association type
+            </p>
+
+            <div className="flex flex-nowrap justify-center gap-2">
+              {relationOptions.map((option) => (
                 <button
-                  key={type}
+                  key={option.value}
                   type="button"
-                  onClick={() => setRelationType(type)}
-                  className={`rounded-lg border px-5 py-3 text-sm ${
-                    relationType === type
-                      ? "border-black bg-black text-white"
-                      : "border-neutral-300 bg-white hover:bg-neutral-100"
+                  onClick={() => chooseRelationType(option.value)}
+                  className={`whitespace-nowrap rounded-lg border px-4 py-1.5 text-sm transition ${
+                    relationType === option.value
+                      ? "border-black bg-black text-white shadow-md"
+                      : "border-neutral-300 bg-white text-black hover:bg-neutral-100"
                   }`}
                 >
-                  {type}
+                  {option.label}
                 </button>
               ))}
             </div>
@@ -173,90 +1536,191 @@ export default function Home() {
 
           <form
             onSubmit={handleSubmit}
-            className="mx-auto mt-4 flex w-full max-w-3xl items-center gap-3 rounded-xl border border-neutral-300 bg-white px-4 py-2 shadow-sm"
+            className="mx-auto mt-2 flex h-[54px] w-full max-w-[754px] items-center gap-3 rounded-xl border border-neutral-300 bg-white px-4 shadow-sm"
           >
+            <label htmlFor="word-search" className="sr-only">
+              Enter a word or phrase
+            </label>
+
             <input
+              id="word-search"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
               placeholder="Enter a word or phrase..."
-              className="min-w-0 flex-1 bg-transparent px-2 py-3 text-lg outline-none"
+              className="min-w-0 flex-1 bg-transparent px-2 text-lg outline-none"
             />
 
             <button
               type="submit"
-              className="rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white hover:bg-neutral-800"
+              disabled={isSearching}
+              className="rounded-lg bg-black px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-wait disabled:bg-neutral-400"
             >
-              Search
+              {isSearching ? "Searching" : "Search"}
             </button>
           </form>
         </section>
 
-        <aside className="hidden rounded-xl border border-neutral-200 bg-white/70 p-5 lg:block">
-          <h2 className="mb-8 text-xs font-bold uppercase tracking-widest">
-            Phrase Details
-          </h2>
+        <aside className="wordsmith-details-panel min-h-0 overflow-y-auto rounded-lg border border-neutral-200 bg-white/70 p-5 shadow-sm">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-widest">
+              Node Details
+            </h2>
 
-          <h3 className="text-2xl font-bold leading-tight">
-            chasing
-            <br />
-            the sunrise
+            <button
+              type="button"
+              onClick={() => setSelectedNode(null)}
+              className="text-xl text-neutral-500 hover:text-black"
+            >
+              x
+            </button>
+          </div>
+
+          <h3 className="break-words text-2xl font-bold leading-tight">
+            {selectedNode ? selectedNode.label : centerPhrase}
           </h3>
 
-          <div className="mt-6 space-y-5 text-sm">
+          {recenterMessage && !selectedNode ? (
+            <p className="mt-2 text-xs text-neutral-500">{recenterMessage}</p>
+          ) : null}
+
+          <div className="mt-5 space-y-4 text-sm">
             <div>
               <p className="mb-1 font-semibold">Relation</p>
-              <span className="rounded-md bg-neutral-200 px-2 py-1 text-xs">
-                Core / Center
+              <span className="inline-flex rounded-md bg-neutral-200 px-2 py-1 text-xs">
+                {selectedNode ? selectedRelation.label : "Core / Center"}
               </span>
             </div>
 
             <div>
-              <p className="mb-1 font-semibold">Meaning</p>
+              <p className="mb-1 font-semibold">Definition</p>
               <p className="text-neutral-700">
-                Pursuing new beginnings, opportunities, or hopes as each day
-                starts.
+                {selectedNode
+                  ? selectedNode.definition
+                  : "Click an outside node to see its popup details."}
               </p>
             </div>
 
             <div>
               <p className="mb-1 font-semibold">Example</p>
               <p className="text-neutral-700">
-                He is always chasing the sunrise, looking for the next big
-                opportunity.
+                {selectedNode
+                  ? selectedNode.example
+                  : "Node details will include the word, relation type, definition, example, and actions."}
               </p>
             </div>
 
-            <div>
-              <p className="mb-1 font-semibold">Tone</p>
-              <div className="flex flex-wrap gap-2">
-                <span className="rounded-md bg-neutral-200 px-2 py-1 text-xs">
-                  Hopeful
-                </span>
-                <span className="rounded-md bg-neutral-200 px-2 py-1 text-xs">
-                  Inspirational
-                </span>
-                <span className="rounded-md bg-neutral-200 px-2 py-1 text-xs">
-                  Optimistic
+            <div className="wordsmith-detail-meta-grid grid grid-cols-2 gap-3">
+              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Tone
+                </p>
+                <span className="inline-flex max-w-full rounded-md bg-neutral-200 px-2 py-1 text-xs">
+                  {selectedNode ? selectedNode.tone : "Center"}
                 </span>
               </div>
+
+              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Part of Speech
+                </p>
+                <p className="truncate text-neutral-700">
+                  {selectedNode ? selectedNode.partOfSpeech : "Phrase"}
+                </p>
+              </div>
+
+              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Source
+                </p>
+                <p className="truncate text-neutral-700">
+                  {selectedNode
+                    ? selectedNode.source ?? graphSourceLabel
+                    : graphSourceLabel}
+                </p>
+              </div>
+
+              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Strength
+                </p>
+                <p className="truncate text-neutral-700">
+                  {selectedNode ? `${selectedNode.strength}/100` : "Center"}
+                </p>
+              </div>
             </div>
+          </div>
+
+          <div className="mt-5 border-t border-neutral-200 pt-4">
+            <div className="grid gap-2">
+              <button
+                type="button"
+                onClick={recenterSelectedNode}
+                disabled={!selectedNode}
+                className="rounded-lg border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-300 disabled:bg-neutral-200 disabled:text-neutral-500"
+              >
+                Re-center
+              </button>
+
+              <button
+                type="button"
+                onClick={saveSelectedNode}
+                disabled={!selectedNode}
+                className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-400"
+              >
+                {isSelectedNodeSaved ? "Saved" : "Save"}
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-neutral-500">
+              {selectedNode
+                ? saveMessage || "Use Re-center to explore from this node."
+                : recenterMessage
+                  ? "A fresh fake related-word web is now displayed."
+                : "Select a graph node to enable actions."}
+            </p>
           </div>
         </aside>
       </div>
 
-      <footer className="mx-6 mb-6 flex items-center justify-between rounded-xl border border-neutral-200 bg-white/70 px-6 py-4 text-sm">
-        <div>
-          <p className="font-bold">12 Nodes</p>
-          <p className="text-neutral-500">Static Step 4 preview</p>
+      <footer
+        className="wordsmith-footer mx-auto grid h-full w-full max-w-[1540px] items-center gap-4 border-t border-neutral-200 px-6 py-3 text-sm"
+        style={{
+          gridTemplateColumns: footerColumns,
+        }}
+      >
+        <div className="rounded-lg border border-neutral-200 bg-white/65 px-4 py-3 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-widest">
+            {currentNodes.length + 1} Nodes
+          </p>
+          <p className="text-xs text-neutral-600">{graphSourceLabel}</p>
         </div>
 
-        <p className="hidden text-neutral-600 md:block">
-          Search, choose a relation type, then generate a word web later.
+        <p className="text-center text-neutral-600">
+          {webSaveMessage ||
+            (isSearching
+            ? "Searching Datamuse..."
+            : searchError ||
+              (isShowingLiveGraph
+                ? `Live Datamuse results for "${centerPhrase}".`
+                : "Drag to pan. Scroll to zoom. Click a dot or label."))}
         </p>
 
-        <button className="rounded-lg border border-neutral-300 px-5 py-2">
-          Save Web
-        </button>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={saveCurrentWeb}
+            className="rounded-lg border border-neutral-300 bg-white/70 px-4 py-2 hover:bg-neutral-100"
+          >
+            Save Web
+          </button>
+
+          <button
+            type="button"
+            className="rounded-lg border border-neutral-300 bg-white/70 px-4 py-2 hover:bg-neutral-100"
+          >
+            Share
+          </button>
+        </div>
       </footer>
     </main>
   );

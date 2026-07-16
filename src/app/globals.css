@@ -8,8 +8,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-mono: "Courier New", Courier, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,4 +23,106 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.wordsmith-shell {
+  --wordsmith-shell-rows: 70px minmax(0, 1fr) 86px;
+  --wordsmith-workspace-columns: 216px minmax(0, 1fr) clamp(300px, 22vw, 360px);
+  --wordsmith-workspace-rows: minmax(0, 1fr);
+  --wordsmith-graph-rows: minmax(0, 1fr) 42px 58px;
+}
+
+@media (max-height: 760px) {
+  .short-screen-hide {
+    display: none !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .wordsmith-shell {
+    --wordsmith-shell-rows: 62px minmax(0, 1fr) 58px;
+    --wordsmith-workspace-columns: minmax(0, 1fr);
+    --wordsmith-workspace-rows: 152px minmax(0, 1fr) 190px;
+    --wordsmith-graph-rows: minmax(0, 1fr) 34px 52px;
+  }
+
+  .wordsmith-header {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .wordsmith-header > div:first-child {
+    min-width: 0;
+  }
+
+  .wordsmith-header h1 {
+    font-size: 1.45rem;
+  }
+
+  .wordsmith-header p {
+    display: none;
+  }
+
+  .wordsmith-header > div:last-child {
+    min-width: 0;
+    gap: 14px;
+  }
+
+  .wordsmith-workspace {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .wordsmith-settings-panel {
+    padding: 12px;
+  }
+
+  .wordsmith-settings-panel > div:nth-of-type(2),
+  .wordsmith-settings-panel .short-screen-hide {
+    display: none !important;
+  }
+
+  .wordsmith-settings-panel > div:first-of-type {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .wordsmith-settings-panel button {
+    padding: 7px 9px;
+    font-size: 0.82rem;
+  }
+
+  .wordsmith-graph-panel form {
+    height: 48px;
+  }
+
+  .wordsmith-graph-panel form input {
+    font-size: 1rem;
+  }
+
+  .wordsmith-details-panel {
+    padding: 14px;
+  }
+
+  .wordsmith-details-panel h3 {
+    font-size: 1.25rem;
+  }
+
+  .wordsmith-details-panel > div:nth-of-type(2) {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  .wordsmith-footer {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 8px 10px;
+    font-size: 0.78rem;
+  }
+
+  .wordsmith-footer > p {
+    display: none;
+  }
 }
