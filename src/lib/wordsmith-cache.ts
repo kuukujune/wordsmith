@@ -9,10 +9,15 @@ export type WordNode = {
   id: string;
   label: string;
   relationType: RelationType;
-  definition: string;
-  example: string;
-  tone: string;
-  partOfSpeech: string;
+  definitions?: string[];
+  definition?: string;
+  example?: string;
+  tone?: string;
+  partOfSpeech?: string;
+  pronunciation?: string;
+  syllableCount?: number;
+  relationshipExplanation: string;
+  relevance: "Strong" | "Moderate" | "Exploratory";
   strength: number;
   source: string;
   parentId: string;
@@ -27,6 +32,7 @@ export type GraphEdge = {
 
 export type WordSearchGraph = {
   center: string;
+  centerNode?: WordNode;
   relationType: RelationType;
   nodes: WordNode[];
   edges: GraphEdge[];
@@ -54,6 +60,11 @@ type SupabaseRelation = {
     depth?: number;
     tone?: string;
     partOfSpeech?: string;
+    definitions?: string[];
+    pronunciation?: string;
+    syllableCount?: number;
+    relationshipExplanation?: string;
+    relevance?: "Strong" | "Moderate" | "Exploratory";
   } | null;
 };
 
@@ -192,12 +203,17 @@ export async function readCachedGraph(
         id: relation.metadata?.nodeId ?? relation.to_entry_id,
         label: entry.text,
         relationType,
-        definition: entry.definition ?? "Coming soon.",
-        example:
-          entry.example ??
-          `Use "${entry.text}" when exploring language around "${center}".`,
-        tone: relation.metadata?.tone ?? "From Supabase cache",
-        partOfSpeech: relation.metadata?.partOfSpeech ?? "Word",
+        definitions: relation.metadata?.definitions,
+        definition: entry.definition ?? undefined,
+        example: entry.example ?? undefined,
+        tone: relation.metadata?.tone,
+        partOfSpeech: relation.metadata?.partOfSpeech,
+        pronunciation: relation.metadata?.pronunciation,
+        syllableCount: relation.metadata?.syllableCount,
+        relationshipExplanation:
+          relation.metadata?.relationshipExplanation ??
+          `Related to "${center}" in this ${relationType} search.`,
+        relevance: relation.metadata?.relevance ?? "Exploratory",
         strength: relation.strength ?? 0,
         source: relation.source ?? entry.source ?? "Supabase cache",
         parentId:
@@ -211,6 +227,19 @@ export async function readCachedGraph(
 
   return {
     center: centerEntry.text,
+    centerNode: {
+      id: "center",
+      label: centerEntry.text,
+      relationType,
+      definition: centerEntry.definition ?? undefined,
+      example: centerEntry.example ?? undefined,
+      relationshipExplanation: "",
+      relevance: "Strong",
+      strength: 100,
+      source: centerEntry.source ?? "Supabase cache",
+      parentId: "center",
+      depth: 0,
+    },
     relationType,
     nodes,
     edges: nodes.map((node) => ({
@@ -228,8 +257,8 @@ async function upsertEntries(graph: WordSearchGraph) {
       normalized_text: normalizeText(graph.center),
       text: graph.center,
       type: "word",
-      definition: null,
-      example: null,
+      definition: graph.centerNode?.definition,
+      example: graph.centerNode?.example,
       source: graph.source,
       language: "en",
     },
@@ -308,6 +337,11 @@ export async function writeCachedGraph(graph: WordSearchGraph) {
           depth: node.depth,
           tone: node.tone,
           partOfSpeech: node.partOfSpeech,
+          definitions: node.definitions,
+          pronunciation: node.pronunciation,
+          syllableCount: node.syllableCount,
+          relationshipExplanation: node.relationshipExplanation,
+          relevance: node.relevance,
         },
       };
     })

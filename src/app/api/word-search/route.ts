@@ -7,31 +7,87 @@ import {
   type WordNode,
   type WordSearchGraph,
 } from "@/lib/wordsmith-cache";
-
-type DatamuseWord = {
-  word: string;
-  score?: number;
-};
+import {
+  getRelationQueries,
+  parseMetadata,
+  rankResults,
+  relationshipExplanation,
+  type DatamuseWord,
+  type RelationQuery,
+} from "@/lib/search-logic";
 
 const firstRingNodeCount = 8;
-const totalGraphNodeLimit = 50;
-const relatedNodeLimit = totalGraphNodeLimit - 1;
-
-const datamuseQueryByRelation: Record<RelationType, string> = {
-  meaning: "ml",
-  rhymes: "rel_rhy",
-  "sounds-like": "sl",
-  "associated-phrases": "rel_trg",
-  "tone-theme": "rel_trg",
-};
+const relatedNodeLimit = 32;
+const supportedRelations = new Set<RelationType>([
+  "meaning",
+  "rhymes",
+  "sounds-like",
+  "associated-phrases",
+  "tone-theme",
+]);
 
 function createNodeId(word: string, index: number, parentId: string) {
-  const slug = `${parentId}-${word}-${index}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+  return (
+    `${parentId}-${word}-${index}`
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") || `node-${index}`
+  );
+}
 
-  return slug || `node-${index}`;
+async function fetchDatamuseQuery(query: RelationQuery, max: number) {
+  const datamuseUrl = new URL("https://api.datamuse.com/words");
+  datamuseUrl.searchParams.set(query.parameter, query.value);
+  datamuseUrl.searchParams.set("max", String(max));
+  datamuseUrl.searchParams.set("md", "dpsrf");
+  datamuseUrl.searchParams.set("ipa", "1");
+  if (query.topics) datamuseUrl.searchParams.set("topics", query.topics);
+
+  const response = await fetch(datamuseUrl, {
+    headers: { Accept: "application/json" },
+    next: { revalidate: 60 * 60 },
+    signal: AbortSignal.timeout(8_000),
+  });
+
+  if (!response.ok) throw new Error("Datamuse search failed.");
+  return (await response.json()) as DatamuseWord[];
+}
+
+async function fetchCenterMetadata(word: string) {
+  const datamuseUrl = new URL("https://api.datamuse.com/words");
+  datamuseUrl.searchParams.set("sp", word);
+  datamuseUrl.searchParams.set("qe", "sp");
+  datamuseUrl.searchParams.set("max", "1");
+  datamuseUrl.searchParams.set("md", "dpsrf");
+  datamuseUrl.searchParams.set("ipa", "1");
+
+  const response = await fetch(datamuseUrl, {
+    headers: { Accept: "application/json" },
+    next: { revalidate: 60 * 60 },
+    signal: AbortSignal.timeout(8_000),
+  });
+
+  if (!response.ok) return undefined;
+  return ((await response.json()) as DatamuseWord[])[0];
+}
+
+function createCenterNode(
+  word: string,
+  relationType: RelationType,
+  metadata?: DatamuseWord
+): WordNode {
+  return {
+    id: "center",
+    label: word,
+    relationType,
+    ...(metadata ? parseMetadata(metadata) : {}),
+    relationshipExplanation: "",
+    relevance: "Strong",
+    strength: 100,
+    source: "Datamuse word-relations database",
+    parentId: "center",
+    depth: 0,
+  };
 }
 
 async function fetchDatamuseWords(
@@ -39,309 +95,178 @@ async function fetchDatamuseWords(
   relationType: RelationType,
   max: number
 ) {
-  const datamuseParameter = datamuseQueryByRelation[relationType];
-  const datamuseUrl = new URL("https://api.datamuse.com/words");
-  datamuseUrl.searchParams.set(datamuseParameter, word);
-  datamuseUrl.searchParams.set("max", String(max));
+  const resultSets = await Promise.all(
+    getRelationQueries(relationType, word).map(async (query) => ({
+      query,
+      results: await fetchDatamuseQuery(query, max),
+    }))
+  );
+  const toneVocabulary = /^(awe|anger|angry|anxious|attitude|atmospheric|bright|calm|comfort|conflict|dark|danger|ethos|fear|fearful|feeling|gentle|grief|happy|harsh|hope|hopeful|joy|joyful|lonely|love|melancholy|mysterious|nostalgic|peaceful|playful|renewal|romantic|sad|sentiment|serene|somber|spirit|spirits|suspense|tense|tension|warm|warmth|wonder)$/i;
 
-  const response = await fetch(datamuseUrl, {
-    headers: {
-      Accept: "application/json",
-    },
-    next: {
-      revalidate: 60 * 60,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("Datamuse search failed.");
-  }
-
-  const words = (await response.json()) as DatamuseWord[];
-
-  return words
-    .filter((result) => result.word.trim() !== "")
-    .sort((first, second) => (second.score ?? 0) - (first.score ?? 0));
+  return resultSets.flatMap(({ query, results }) =>
+    results
+      .filter((result) =>
+        /[a-z0-9]/i.test(result.word) &&
+        !/^(a|an|and|as|at|be|by|for|from|in|is|it|of|on|or|that|the|to|was|with)$/i.test(result.word.trim())
+      )
+      .map((result) => {
+        if (relationType !== "associated-phrases") return result;
+        if (query.parameter === "rel_bga") return { ...result, word: `${word} ${result.word}` };
+        if (query.parameter === "rel_bgb") return { ...result, word: `${result.word} ${word}` };
+        return result;
+      })
+      .filter((result) =>
+        relationType === "tone-theme"
+          ? toneVocabulary.test(result.word)
+          : relationType !== "associated-phrases" || result.word.includes(" ")
+      )
+  );
 }
 
-function normalizeDatamuseWord(
+function createNode(
   result: DatamuseWord,
   relationType: RelationType,
   centerWord: string,
   parentId: string,
   depth: number,
-  index: number
+  index: number,
+  strength: number,
+  relevance: WordNode["relevance"]
 ): WordNode {
   return {
     id: createNodeId(result.word, index, parentId),
     label: result.word,
     relationType,
-    definition: "Coming soon.",
-    example: `Use "${result.word}" when exploring language around "${centerWord}".`,
-    tone: "From Datamuse",
-    partOfSpeech: "Word",
-    strength: result.score ?? 0,
-    source: "Datamuse",
+    ...parseMetadata(result),
+    relationshipExplanation: relationshipExplanation(
+      relationType,
+      centerWord,
+      result.word
+    ),
+    relevance,
+    strength,
+    source: "Datamuse word-relations database",
     parentId,
     depth,
-  };
-}
-
-function createFallbackNode(
-  word: string,
-  relationType: RelationType,
-  parentLabel: string,
-  parentId: string,
-  depth: number,
-  index: number
-): WordNode {
-  const fallbackNode = normalizeDatamuseWord(
-    {
-      word,
-      score: Math.max(1, 5000 - index * 50),
-    },
-    relationType,
-    parentLabel,
-    parentId,
-    depth,
-    index
-  );
-
-  return {
-    ...fallbackNode,
-    source: "Generated fallback",
-    tone: "Generated fallback",
   };
 }
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const word = searchParams.get("word")?.trim();
+  const word = searchParams.get("word")?.trim().replace(/\s+/g, " ");
   const relationType = searchParams.get("relationType") as RelationType | null;
 
   if (!word) {
     return NextResponse.json(
-      { error: "A word or phrase is required." },
+      { error: "Enter a word or phrase to search." },
       { status: 400 }
     );
   }
-
-  if (!relationType || !(relationType in datamuseQueryByRelation)) {
+  if (word.length > 100 || /^\d+$/.test(word)) {
     return NextResponse.json(
-      { error: "A supported relation type is required." },
+      { error: "Use a word or short phrase of up to 100 characters." },
       { status: 400 }
     );
   }
-
-  const activeRelationType = relationType;
+  if (!relationType || !supportedRelations.has(relationType)) {
+    return NextResponse.json(
+      { error: "Choose a supported relationship type." },
+      { status: 400 }
+    );
+  }
 
   try {
-    const cachedGraph = await readCachedGraph(word, activeRelationType);
-
+    const cachedGraph = await readCachedGraph(word, relationType);
     if (cachedGraph) {
-      return NextResponse.json(cachedGraph);
+      const centerNode = createCenterNode(
+        word,
+        relationType,
+        await fetchCenterMetadata(word)
+      );
+      return NextResponse.json({ ...cachedGraph, centerNode });
     }
 
-    const topResults = await fetchDatamuseWords(
+    const centerNode = createCenterNode(
       word,
-      activeRelationType,
-      30
+      relationType,
+      await fetchCenterMetadata(word)
     );
-    const seenLabels = new Set([word.toLowerCase()]);
+
+    const topResults = rankResults(
+      await fetchDatamuseWords(word, relationType, 40),
+      word,
+      firstRingNodeCount
+    );
     const nodes: WordNode[] = [];
     const edges: GraphEdge[] = [];
+    const seenLabels = new Set([word.toLocaleLowerCase()]);
 
-    for (const result of topResults) {
-      const normalizedResult = result.word.toLowerCase();
-
-      if (seenLabels.has(normalizedResult)) {
-        continue;
-      }
-
-      seenLabels.add(normalizedResult);
-      const node = normalizeDatamuseWord(
-        result,
-        activeRelationType,
+    for (const ranked of topResults) {
+      const node = createNode(
+        ranked.result,
+        relationType,
         word,
         "center",
         1,
-        nodes.length
+        nodes.length,
+        ranked.strength,
+        ranked.relevance
       );
+      seenLabels.add(node.label.toLocaleLowerCase());
       nodes.push(node);
-      edges.push({
-        id: `edge-center-${node.id}`,
-        source: "center",
-        target: node.id,
-      });
-
-      if (nodes.length >= firstRingNodeCount) {
-        break;
-      }
+      edges.push({ id: `edge-center-${node.id}`, source: "center", target: node.id });
     }
 
-    while (nodes.length < firstRingNodeCount) {
-      const fallbackIndex = nodes.length;
-      const fallbackLabel = `${word} related ${fallbackIndex + 1}`;
-      const normalizedFallbackLabel = fallbackLabel.toLowerCase();
-
-      if (seenLabels.has(normalizedFallbackLabel)) {
-        break;
-      }
-
-      seenLabels.add(normalizedFallbackLabel);
-      const fallbackNode = createFallbackNode(
-        fallbackLabel,
-        activeRelationType,
-        word,
-        "center",
-        1,
-        fallbackIndex
-      );
-      nodes.push(fallbackNode);
-      edges.push({
-        id: `edge-center-${fallbackNode.id}`,
-        source: "center",
-        target: fallbackNode.id,
-      });
-    }
-
-    const firstRingNodes = [...nodes];
-    const remainingNodeSlots = Math.max(0, relatedNodeLimit - nodes.length);
-    const childBaseCount = Math.floor(
-      remainingNodeSlots / Math.max(firstRingNodes.length, 1)
-    );
-    let extraChildSlots = remainingNodeSlots % Math.max(firstRingNodes.length, 1);
-    const childTargets = new Map<string, number>();
-
-    firstRingNodes.forEach((parentNode) => {
-      const childLimit = childBaseCount + (extraChildSlots > 0 ? 1 : 0);
-      extraChildSlots = Math.max(0, extraChildSlots - 1);
-      childTargets.set(parentNode.id, childLimit);
-    });
-
-    const childResultsByParent = await Promise.all(
-      firstRingNodes.map(async (parentNode) => ({
+    const childResultSets = await Promise.all(
+      nodes.map(async (parentNode) => ({
         parentNode,
-        results: await fetchDatamuseWords(
+        ranked: rankResults(
+          await fetchDatamuseWords(parentNode.label, relationType, 20),
           parentNode.label,
-          activeRelationType,
-          50
+          4
         ),
       }))
     );
-    const childCursors = new Map<string, number>();
-    const childCounts = new Map<string, number>();
 
-    function addChildNode(parentNode: WordNode, result: DatamuseWord) {
-      if (nodes.length >= relatedNodeLimit) {
-        return false;
+    for (const { parentNode, ranked } of childResultSets) {
+      for (const item of ranked) {
+        if (nodes.length >= relatedNodeLimit) break;
+        const normalized = item.result.word.toLocaleLowerCase();
+        if (seenLabels.has(normalized)) continue;
+        seenLabels.add(normalized);
+        const node = createNode(
+          item.result,
+          relationType,
+          parentNode.label,
+          parentNode.id,
+          2,
+          nodes.length,
+          item.strength,
+          item.relevance
+        );
+        nodes.push(node);
+        edges.push({
+          id: `edge-${parentNode.id}-${node.id}`,
+          source: parentNode.id,
+          target: node.id,
+        });
       }
-
-      const normalizedResult = result.word.toLowerCase();
-
-      if (seenLabels.has(normalizedResult)) {
-        return false;
-      }
-
-      seenLabels.add(normalizedResult);
-      const childNode = normalizeDatamuseWord(
-        result,
-        activeRelationType,
-        parentNode.label,
-        parentNode.id,
-        2,
-        nodes.length
-      );
-      nodes.push(childNode);
-      edges.push({
-        id: `edge-${parentNode.id}-${childNode.id}`,
-        source: parentNode.id,
-        target: childNode.id,
-      });
-      childCounts.set(parentNode.id, (childCounts.get(parentNode.id) ?? 0) + 1);
-
-      return true;
-    }
-
-    for (const { parentNode, results } of childResultsByParent) {
-      const childTarget = childTargets.get(parentNode.id) ?? 0;
-
-      for (let index = 0; index < results.length; index += 1) {
-        childCursors.set(parentNode.id, index + 1);
-
-        if ((childCounts.get(parentNode.id) ?? 0) >= childTarget) {
-          break;
-        }
-
-        addChildNode(parentNode, results[index]);
-      }
-    }
-
-    while (nodes.length < relatedNodeLimit) {
-      let addedNodeThisPass = false;
-
-      for (const { parentNode, results } of childResultsByParent) {
-        let cursor = childCursors.get(parentNode.id) ?? 0;
-
-        while (cursor < results.length && nodes.length < relatedNodeLimit) {
-          const result = results[cursor];
-          cursor += 1;
-          childCursors.set(parentNode.id, cursor);
-
-          if (addChildNode(parentNode, result)) {
-            addedNodeThisPass = true;
-            break;
-          }
-        }
-      }
-
-      if (!addedNodeThisPass) {
-        break;
-      }
-    }
-
-    while (nodes.length < relatedNodeLimit && firstRingNodes.length > 0) {
-      const parentNode = firstRingNodes[nodes.length % firstRingNodes.length];
-      const fallbackIndex = nodes.length;
-      const fallbackLabel = `${parentNode.label} related ${fallbackIndex + 1}`;
-      const normalizedFallbackLabel = fallbackLabel.toLowerCase();
-
-      if (seenLabels.has(normalizedFallbackLabel)) {
-        break;
-      }
-
-      seenLabels.add(normalizedFallbackLabel);
-      const fallbackNode = createFallbackNode(
-        fallbackLabel,
-        activeRelationType,
-        parentNode.label,
-        parentNode.id,
-        2,
-        fallbackIndex
-      );
-      nodes.push(fallbackNode);
-      edges.push({
-        id: `edge-${parentNode.id}-${fallbackNode.id}`,
-        source: parentNode.id,
-        target: fallbackNode.id,
-      });
     }
 
     const graph: WordSearchGraph = {
       center: word,
-      relationType: activeRelationType,
+      centerNode,
+      relationType,
       nodes,
       edges,
-      source: "Datamuse",
+      source: "Datamuse word-relations database",
     };
-
     await writeCachedGraph(graph);
-
     return NextResponse.json(graph);
-  } catch {
-    return NextResponse.json(
-      { error: "Could not reach Datamuse." },
-      { status: 502 }
-    );
+  } catch (error) {
+    const message = error instanceof Error && error.name === "TimeoutError"
+      ? "The word service timed out. Please retry."
+      : "The word service is unavailable. Please retry.";
+    return NextResponse.json({ error: message }, { status: 502 });
   }
 }

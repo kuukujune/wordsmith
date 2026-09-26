@@ -8,8 +8,8 @@ type SavedWord = {
   word: string;
   relationType: string;
   centerWord: string;
-  definition: string;
-  example: string;
+  definition?: string;
+  example?: string;
   savedAt: string;
 };
 
@@ -18,6 +18,7 @@ type SavedWeb = {
   title: string;
   centerWord: string;
   relationType: string;
+  relationValue?: string;
   source: string;
   nodeCount: number;
   nodes: Array<{
@@ -26,6 +27,7 @@ type SavedWeb = {
     strength: number;
     source?: string;
   }>;
+  edges?: Array<{ id: string; source: string; target: string }>;
   savedAt: string;
 };
 
@@ -173,12 +175,8 @@ export default function WordBankPage() {
                     </button>
                   </div>
 
-                  <p className="mt-4 text-sm text-neutral-700">
-                    {savedWord.definition}
-                  </p>
-                  <p className="mt-3 text-sm text-neutral-600">
-                    {savedWord.example}
-                  </p>
+                  {savedWord.definition ? <p className="mt-4 text-sm text-neutral-700">{savedWord.definition}</p> : null}
+                  {savedWord.example ? <p className="mt-3 text-sm text-neutral-600">{savedWord.example}</p> : null}
                   <p className="mt-4 text-xs uppercase tracking-widest text-neutral-400">
                     {formatSavedDate(savedWord.savedAt)}
                   </p>
@@ -219,13 +217,10 @@ export default function WordBankPage() {
                         {savedWeb.source}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => removeSavedWeb(savedWeb.id)}
-                      className="rounded-md border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-100"
-                    >
-                      Remove
-                    </button>
+                    <div className="flex gap-2">
+                      <Link href={`/?savedWeb=${encodeURIComponent(savedWeb.id)}`} className="rounded-md bg-black px-3 py-1 text-sm font-semibold text-white hover:bg-neutral-800">Open web</Link>
+                      <button type="button" onClick={() => removeSavedWeb(savedWeb.id)} className="rounded-md border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-100">Remove</button>
+                    </div>
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">

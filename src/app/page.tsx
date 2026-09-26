@@ -2,7 +2,10 @@
 
 import type { Core, EventObject, StylesheetJson } from "cytoscape";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import type { RhymeMode, RhymeResult, RhymeScoreBreakdown, RhymeSearchResponse } from "@/lib/rhyme/types";
+import { createRhymeGraph, expansionElements } from "@/lib/rhyme/graph-adapter";
+import { updateExplorationTrail } from "@/lib/search-logic";
 
 const relationOptions = [
   {
@@ -28,9 +31,12 @@ const relationOptions = [
   {
     value: "tone-theme",
     label: "Tone / Theme",
-    helper: "Mood and feeling",
+    helper: "Mood and feeling (experimental)",
   },
 ] as const;
+
+const primaryRelationOptions = relationOptions.slice(0, 3);
+const moreRelationOptions = relationOptions.slice(3);
 
 type RelationType = (typeof relationOptions)[number]["value"];
 
@@ -38,14 +44,27 @@ type WordNode = {
   id: string;
   label: string;
   relationType?: RelationType;
-  definition: string;
-  example: string;
-  tone: string;
-  partOfSpeech: string;
+  definitions?: string[];
+  definition?: string;
+  example?: string;
+  tone?: string;
+  partOfSpeech?: string;
+  pronunciation?: string;
+  syllableCount?: number;
+  relationshipExplanation?: string;
+  relevance?: "Strong" | "Moderate" | "Exploratory";
   strength: number;
   source?: string;
   parentId?: string;
   depth?: number;
+  rhymeData?: {
+    relationship: RhymeResult["relationship"];
+    syllableCount: number;
+    stressPattern: number[];
+    phonemes: string[];
+    rhymeTail: string[];
+    scoreBreakdown: RhymeScoreBreakdown;
+  };
 };
 
 type GraphEdge = {
@@ -56,10 +75,12 @@ type GraphEdge = {
 
 type WordSearchResponse = {
   center: string;
+  centerNode?: WordNode;
   relationType: RelationType;
   nodes: WordNode[];
   edges: GraphEdge[];
   source: string;
+  rhymeMode?: RhymeMode;
 };
 
 type SavedWord = {
@@ -67,8 +88,8 @@ type SavedWord = {
   word: string;
   relationType: string;
   centerWord: string;
-  definition: string;
-  example: string;
+  definition?: string;
+  example?: string;
   savedAt: string;
 };
 
@@ -77,14 +98,13 @@ type SavedWeb = {
   title: string;
   centerWord: string;
   relationType: string;
+  relationValue: RelationType;
   source: string;
   nodeCount: number;
-  nodes: Array<{
-    id: string;
-    label: string;
-    strength: number;
-    source?: string;
-  }>;
+  nodes: WordNode[];
+  edges: GraphEdge[];
+  centerNode?: WordNode;
+  rhymeMode?: RhymeMode;
   savedAt: string;
 };
 
@@ -104,7 +124,20 @@ const compactWorkspaceRows = "152px minmax(0, 1fr) 190px";
 const desktopGraphRows = "minmax(0, 1fr) 42px 58px";
 const compactGraphRows = "minmax(0, 1fr) 34px 52px";
 
-const fakeNodes: WordNode[] = [
+const rhymeModeOptions: Array<{ value: RhymeMode; label: string }> = [
+  { value: "auto", label: "All" },
+  { value: "perfect", label: "Perfect" },
+  { value: "near", label: "Near" },
+  { value: "multisyllabic", label: "Multisyllabic" },
+  { value: "assonance", label: "Assonance" },
+  { value: "consonance", label: "Consonance" },
+];
+
+function rhymeResponseToGraph(response: RhymeSearchResponse): WordSearchResponse {
+  return createRhymeGraph(response);
+}
+
+const sampleNodes: WordNode[] = [
   {
     id: "following-the-light",
     label: "following the light",
@@ -390,7 +423,7 @@ function createNodeId(centerPhrase: string, label: string, index: number) {
   return slug || `node-${index}`;
 }
 
-function createFakeNode(
+function createSampleNode(
   centerPhrase: string,
   label: string,
   index: number,
@@ -409,7 +442,7 @@ function createFakeNode(
   return {
     id: createNodeId(centerPhrase, label, index),
     label,
-    definition: `A phrase connected to "${centerPhrase}" for this fake MVP exploration set.`,
+    definition: `A curated example phrase connected to "${centerPhrase}".`,
     example: `She wrote "${label}" beside "${centerPhrase}" while looking for a better line.`,
     tone: tones[index % tones.length],
     partOfSpeech: "Phrase",
@@ -419,7 +452,7 @@ function createFakeNode(
   };
 }
 
-function buildFakeRelatedNodes(centerPhrase: string, relationType: RelationType) {
+function buildSampleRelatedNodes(centerPhrase: string, relationType: RelationType) {
   const meaningTemplates = [
     "the heart of {word}",
     "what {word} is reaching for",
@@ -504,8 +537,8 @@ function buildFakeRelatedNodes(centerPhrase: string, relationType: RelationType)
 
   const sourceNodes =
     normalizePhrase(centerPhrase) === "chasing the sunrise"
-      ? fakeNodes
-      : labels.map((label, index) => createFakeNode(centerPhrase, label, index));
+      ? sampleNodes
+      : labels.map((label, index) => createSampleNode(centerPhrase, label, index));
 
   const firstRingNodes = [...sourceNodes]
     .sort((first, second) => second.strength - first.strength)
@@ -533,7 +566,7 @@ function buildFakeRelatedNodes(centerPhrase: string, relationType: RelationType)
       const nodeIndex = nodes.length;
 
       nodes.push(
-        createFakeNode(
+        createSampleNode(
           parentNode.label,
           label,
           nodeIndex,
@@ -546,6 +579,9 @@ function buildFakeRelatedNodes(centerPhrase: string, relationType: RelationType)
 
   return nodes.slice(0, relatedNodeLimit);
 }
+
+// Retained only as non-live design fixture data; search and error flows never use it.
+void buildSampleRelatedNodes;
 
 function buildEdgesFromNodes(nodes: WordNode[]) {
   return nodes.map((node) => {
@@ -819,6 +855,10 @@ const graphStylesheet = [
       "curve-style": "straight",
     },
   },
+  { selector: ".rhyme-near", style: { "line-style": "dashed" } },
+  { selector: ".rhyme-multisyllabic", style: { width: 2.4 } },
+  { selector: ".rhyme-assonance", style: { "line-style": "dotted" } },
+  { selector: ".rhyme-consonance", style: { "line-style": "dashed", width: 1.5 } },
   {
     selector: ".first-ring-node",
     style: {
@@ -859,10 +899,13 @@ export default function Home() {
   const graphContainerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<ResizableCore | null>(null);
   const currentNodesRef = useRef<WordNode[]>([]);
+  const searchControllerRef = useRef<AbortController | null>(null);
+  const hasInitializedRef = useRef(false);
 
-  const [searchTerm, setSearchTerm] = useState("chasing the sunrise");
-  const [centerPhrase, setCenterPhrase] = useState("chasing the sunrise");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [centerPhrase, setCenterPhrase] = useState("Wordsmith");
   const [relationType, setRelationType] = useState<RelationType>("meaning");
+  const [rhymeMode, setRhymeMode] = useState<RhymeMode>("auto");
   const [selectedNode, setSelectedNode] = useState<WordNode | null>(null);
   const [recenterMessage, setRecenterMessage] = useState("");
   const [liveGraph, setLiveGraph] = useState<WordSearchResponse | null>(null);
@@ -870,6 +913,13 @@ export default function Home() {
   const [searchError, setSearchError] = useState("");
   const [webSaveMessage, setWebSaveMessage] = useState("");
   const [isCompactLayout, setIsCompactLayout] = useState(false);
+  const [viewMode, setViewMode] = useState<"web" | "list">("web");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showMoreRelations, setShowMoreRelations] = useState(false);
+  const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null);
+  const [expandedRhymeKeys, setExpandedRhymeKeys] = useState<Set<string>>(() => new Set());
+  const [explorationTrail, setExplorationTrail] = useState<WordSearchResponse[]>([]);
+  const [trailIndex, setTrailIndex] = useState(-1);
   const [savedWords, setSavedWords] = useState<SavedWord[]>(() => {
     if (typeof window === "undefined") {
       return [];
@@ -923,7 +973,10 @@ export default function Home() {
     normalizePhrase(liveGraph.center) === normalizePhrase(centerPhrase) &&
     liveGraph.relationType === relationType;
 
-  const graphSourceLabel = isShowingLiveGraph ? "Datamuse" : "Fake MVP data";
+  const graphSourceLabel = isShowingLiveGraph
+    ? liveGraph.source
+    : "No search results yet";
+  const detailNode = selectedNode ?? (isShowingLiveGraph ? liveGraph?.centerNode ?? null : null);
   const shellRows = isCompactLayout ? compactShellRows : desktopShellRows;
   const workspaceColumns = isCompactLayout
     ? compactWorkspaceColumns
@@ -931,25 +984,214 @@ export default function Home() {
   const workspaceRows = isCompactLayout
     ? compactWorkspaceRows
     : desktopWorkspaceRows;
-  const graphRows = isCompactLayout ? compactGraphRows : desktopGraphRows;
+  const graphRows = relationType === "rhymes"
+    ? isCompactLayout ? "minmax(0, 1fr) 68px 52px" : "minmax(0, 1fr) 78px 58px"
+    : isCompactLayout ? compactGraphRows : desktopGraphRows;
   const footerColumns = isCompactLayout
     ? "minmax(0, 1fr) auto"
     : workspaceColumns;
 
   const currentNodes = useMemo(() => {
-    return isShowingLiveGraph && liveGraph
-      ? liveGraph.nodes
-      : buildFakeRelatedNodes(centerPhrase, relationType);
-  }, [centerPhrase, isShowingLiveGraph, liveGraph, relationType]);
+    return isShowingLiveGraph && liveGraph ? liveGraph.nodes : [];
+  }, [isShowingLiveGraph, liveGraph]);
   const currentEdges = useMemo(() => {
-    return isShowingLiveGraph && liveGraph
-      ? liveGraph.edges
-      : buildEdgesFromNodes(currentNodes);
-  }, [currentNodes, isShowingLiveGraph, liveGraph]);
+    return isShowingLiveGraph && liveGraph ? liveGraph.edges : [];
+  }, [isShowingLiveGraph, liveGraph]);
+
+  const performSearch = useCallback(
+    async (
+      term: string,
+      type: RelationType,
+      options: { recordTrail?: boolean; urlMode?: "push" | "replace" | "none"; rhymeModeOverride?: RhymeMode } = {}
+    ) => {
+      const cleanedTerm = term.trim().replace(/\s+/g, " ");
+      if (!cleanedTerm) {
+        setSearchError("Enter a word or phrase to search.");
+        return false;
+      }
+
+      searchControllerRef.current?.abort();
+      const controller = new AbortController();
+      searchControllerRef.current = controller;
+      setIsSearching(true);
+      setSearchError("");
+      setSaveMessage("");
+      setWebSaveMessage("");
+
+      try {
+        const activeRhymeMode = options.rhymeModeOverride ?? rhymeMode;
+        const response = type === "rhymes"
+          ? await fetch("/api/rhyme", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ query: cleanedTerm, mode: activeRhymeMode, limit: 40 }),
+              signal: controller.signal,
+            })
+          : await fetch(
+              `/api/word-search?word=${encodeURIComponent(cleanedTerm)}&relationType=${encodeURIComponent(type)}`,
+              { signal: controller.signal }
+            );
+        const payload = (await response.json()) as WordSearchResponse | RhymeSearchResponse | { error?: string };
+        if (!response.ok || "error" in payload) {
+          throw new Error("error" in payload ? payload.error : "Search failed.");
+        }
+        const graph = type === "rhymes"
+          ? rhymeResponseToGraph(payload as RhymeSearchResponse)
+          : payload as WordSearchResponse;
+
+        setCenterPhrase(graph.center);
+        setSearchTerm(graph.center);
+        setRelationType(graph.relationType);
+        setLiveGraph(graph);
+        setExpandedRhymeKeys(new Set());
+        setSelectedNode(null);
+        setRecenterMessage("");
+
+        if (options.recordTrail !== false) {
+          setExplorationTrail((current) => {
+            const updated = updateExplorationTrail(current, trailIndex, graph);
+            setTrailIndex(updated.index);
+            return updated.trail;
+          });
+        }
+
+        const url = `/?word=${encodeURIComponent(graph.center)}&relation=${encodeURIComponent(graph.relationType)}`;
+        if (options.urlMode === "replace") window.history.replaceState({}, "", url);
+        else if (options.urlMode !== "none") window.history.pushState({}, "", url);
+        return true;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return false;
+        setSearchError(error instanceof Error ? error.message : "Search failed. Please retry.");
+        return false;
+      } finally {
+        if (searchControllerRef.current === controller) {
+          setIsSearching(false);
+          searchControllerRef.current = null;
+        }
+      }
+    },
+    [rhymeMode, trailIndex]
+  );
+
+  const expandRhymeNode = useCallback(async (parentNode: WordNode) => {
+    if (relationType !== "rhymes" || !liveGraph || liveGraph.nodes.length >= relatedNodeLimit) return;
+    const expansionKey = `${parentNode.id}:${rhymeMode}`;
+    if (expandedRhymeKeys.has(expansionKey)) return;
+    setExpandedRhymeKeys((current) => new Set(current).add(expansionKey));
+    setExpandingNodeId(parentNode.id);
+    try {
+      const response = await fetch("/api/rhyme", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: parentNode.label,
+          mode: rhymeMode,
+          limit: 8,
+          exclude: [centerPhrase, ...liveGraph.nodes.map((node) => node.label)],
+        }),
+      });
+      const payload = (await response.json()) as RhymeSearchResponse | { error?: string };
+      if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Expansion failed.");
+      const rhymePayload = payload as RhymeSearchResponse;
+      setLiveGraph((current) => {
+        if (!current || current.relationType !== "rhymes") return current;
+        const expansion = expansionElements(
+          rhymePayload.results,
+          { ...parentNode, relationType: "rhymes", relevance: parentNode.relevance ?? "Exploratory", source: parentNode.source ?? current.source, parentId: parentNode.parentId ?? "center", depth: parentNode.depth ?? 1 },
+          [current.center, ...current.nodes.map((node) => node.label)],
+          current.nodes.length,
+          relatedNodeLimit
+        );
+        const children = expansion.nodes;
+        return {
+          ...current,
+          nodes: [...current.nodes, ...children],
+          edges: [...current.edges, ...expansion.edges],
+        };
+      });
+    } catch (error) {
+      setExpandedRhymeKeys((current) => {
+        const next = new Set(current);
+        next.delete(expansionKey);
+        return next;
+      });
+      setSearchError(error instanceof Error ? error.message : "Could not expand this rhyme branch.");
+    } finally {
+      setExpandingNodeId(null);
+    }
+  }, [centerPhrase, expandedRhymeKeys, liveGraph, relationType, rhymeMode]);
+
+  useEffect(() => {
+    if (selectedNode?.rhymeData && relationType === "rhymes") {
+      queueMicrotask(() => void expandRhymeNode(selectedNode));
+    }
+  }, [expandRhymeNode, relationType, selectedNode]);
 
   useEffect(() => {
     currentNodesRef.current = currentNodes;
   }, [currentNodes]);
+
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const savedWebId = params.get("savedWeb");
+    if (savedWebId) {
+      const savedWeb = savedWebs.find((item) => item.id === savedWebId);
+      if (savedWeb) {
+        const restoredType =
+          savedWeb.relationValue ??
+          relationOptions.find((option) => option.label === savedWeb.relationType)?.value ??
+          "meaning";
+        const graph: WordSearchResponse = {
+          center: savedWeb.centerWord,
+          centerNode: savedWeb.centerNode,
+          relationType: restoredType,
+          nodes: savedWeb.nodes,
+          edges: savedWeb.edges ?? buildEdgesFromNodes(savedWeb.nodes),
+          source: savedWeb.source,
+          rhymeMode: savedWeb.rhymeMode,
+        };
+        queueMicrotask(() => {
+          setCenterPhrase(graph.center);
+          setSearchTerm(graph.center);
+          setRelationType(graph.relationType);
+          setLiveGraph(graph);
+          setRhymeMode(graph.rhymeMode ?? "auto");
+          setExplorationTrail([graph]);
+          setTrailIndex(0);
+          setRecenterMessage(`Reopened saved web “${savedWeb.title}”.`);
+        });
+        window.history.replaceState(
+          {},
+          "",
+          `/?word=${encodeURIComponent(graph.center)}&relation=${encodeURIComponent(graph.relationType)}`
+        );
+        return;
+      }
+    }
+
+    const word = params.get("word");
+    const relation = params.get("relation") as RelationType | null;
+    if (word && relation && relationOptions.some((option) => option.value === relation)) {
+      queueMicrotask(() => void performSearch(word, relation, { urlMode: "replace" }));
+    }
+  }, [performSearch, savedWebs]);
+
+  useEffect(() => {
+    function restoreFromBrowserHistory() {
+      const params = new URLSearchParams(window.location.search);
+      const word = params.get("word");
+      const relation = params.get("relation") as RelationType | null;
+      if (word && relation && relationOptions.some((option) => option.value === relation)) {
+        void performSearch(word, relation, { recordTrail: false, urlMode: "none" });
+      }
+    }
+
+    window.addEventListener("popstate", restoreFromBrowserHistory);
+    return () => window.removeEventListener("popstate", restoreFromBrowserHistory);
+  }, [performSearch]);
 
   useEffect(() => {
     function updateLayoutMode() {
@@ -1034,13 +1276,18 @@ export default function Home() {
       };
     });
 
-    const edges = currentEdges.map((edge) => ({
-      data: {
+    const edges = currentEdges.map((edge) => {
+      const relationship = currentNodes.find((node) => node.id === edge.target)?.rhymeData?.relationship;
+      const classes = relationship === "near-rhyme" ? "rhyme-near"
+        : relationship === "multisyllabic-rhyme" ? "rhyme-multisyllabic"
+        : relationship === "assonance" ? "rhyme-assonance"
+        : relationship === "consonance" ? "rhyme-consonance" : "";
+      return { data: {
         id: edge.id,
         source: edge.source,
         target: edge.target,
-      },
-    }));
+      }, classes };
+    });
 
     return [centerNode, ...outerNodes, ...edges];
   }, [centerPhrase, currentEdges, currentNodes]);
@@ -1172,60 +1419,25 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    const cleanedSearchTerm = searchTerm.trim();
-
-    if (cleanedSearchTerm === "") {
-      alert("Please enter a word or phrase.");
-      return;
-    }
-
-    setIsSearching(true);
-    setSearchError("");
-    setRecenterMessage("");
-    setSaveMessage("");
-    setWebSaveMessage("");
-
-    try {
-      const response = await fetch(
-        `/api/word-search?word=${encodeURIComponent(
-          cleanedSearchTerm
-        )}&relationType=${encodeURIComponent(relationType)}`
-      );
-      const graph = (await response.json()) as
-        | WordSearchResponse
-        | { error?: string };
-
-      if (!response.ok || !("nodes" in graph)) {
-        const errorMessage = "error" in graph ? graph.error : undefined;
-        throw new Error(errorMessage || "Search failed.");
-      }
-
-      setCenterPhrase(graph.center);
-      setLiveGraph(graph);
-      setSelectedNode(null);
-    } catch (error) {
-      setCenterPhrase(cleanedSearchTerm);
-      setLiveGraph(null);
-      setSelectedNode(null);
-      setSearchError(
-        error instanceof Error
-          ? `${error.message} Showing fake MVP results instead.`
-          : "Search failed. Showing fake MVP results instead."
-      );
-    } finally {
-      setIsSearching(false);
-    }
+    void performSearch(searchTerm, relationType);
   }
 
   function chooseRelationType(type: RelationType) {
     setRelationType(type);
-    setLiveGraph(null);
     setSelectedNode(null);
     setSearchError("");
     setRecenterMessage("");
     setSaveMessage("");
     setWebSaveMessage("");
+    if (isShowingLiveGraph) void performSearch(centerPhrase, type);
+  }
+
+  function chooseRhymeMode(mode: RhymeMode) {
+    setRhymeMode(mode);
+    setSelectedNode(null);
+    if (isShowingLiveGraph && relationType === "rhymes") {
+      void performSearch(centerPhrase, "rhymes", { rhymeModeOverride: mode });
+    }
   }
 
   function zoomIn() {
@@ -1270,23 +1482,38 @@ export default function Home() {
     cy.fit(undefined, 10);
   }
 
-  function recenterSelectedNode() {
+  async function recenterSelectedNode() {
     if (!selectedNode) {
       return;
     }
 
     const previousCenterPhrase = centerPhrase;
 
-    setCenterPhrase(selectedNode.label);
-    setSearchTerm(selectedNode.label);
-    setLiveGraph(null);
+    const nextCenter = selectedNode.label;
+    const didSearch = await performSearch(nextCenter, relationType);
+    if (didSearch) {
+      setRecenterMessage(
+        `Re-centered from "${previousCenterPhrase}" to "${nextCenter}" with live results.`
+      );
+    }
+  }
+
+  function restoreTrailGraph(index: number) {
+    const graph = explorationTrail[index];
+    if (!graph) return;
+    setTrailIndex(index);
+    setCenterPhrase(graph.center);
+    setSearchTerm(graph.center);
+    setRelationType(graph.relationType);
+    setLiveGraph(graph);
+    setRhymeMode(graph.rhymeMode ?? "auto");
     setSelectedNode(null);
     setSearchError("");
-    setRecenterMessage(
-      `Re-centered from "${previousCenterPhrase}" to "${selectedNode.label}".`
+    window.history.pushState(
+      {},
+      "",
+      `/?word=${encodeURIComponent(graph.center)}&relation=${encodeURIComponent(graph.relationType)}`
     );
-    setSaveMessage("");
-    setWebSaveMessage("");
   }
 
   function saveSelectedNode() {
@@ -1315,19 +1542,19 @@ export default function Home() {
   }
 
   function saveCurrentWeb() {
+    if (!isShowingLiveGraph) return;
     const savedWeb: SavedWeb = {
       id: `${normalizePhrase(centerPhrase)}-${relationType}`,
       title: `${centerPhrase} - ${selectedRelation.label}`,
       centerWord: centerPhrase,
       relationType: selectedRelation.label,
+      relationValue: relationType,
       source: graphSourceLabel,
       nodeCount: currentNodes.length + 1,
-      nodes: currentNodes.map((node) => ({
-        id: node.id,
-        label: node.label,
-        strength: node.strength,
-        source: node.source,
-      })),
+      nodes: currentNodes,
+      edges: currentEdges,
+      centerNode: liveGraph?.centerNode,
+      rhymeMode: liveGraph?.rhymeMode,
       savedAt: new Date().toISOString(),
     };
 
@@ -1339,6 +1566,18 @@ export default function Home() {
       return [savedWeb, ...withoutDuplicate];
     });
     setWebSaveMessage(`Saved "${centerPhrase}" web locally.`);
+  }
+
+  async function shareCurrentWeb() {
+    if (!isShowingLiveGraph) return;
+    const url = `${window.location.origin}/?word=${encodeURIComponent(centerPhrase)}&relation=${encodeURIComponent(relationType)}`;
+    if (navigator.share) {
+      await navigator.share({ title: `${centerPhrase} - Wordsmith`, url });
+      setWebSaveMessage("Shared this web.");
+    } else {
+      await navigator.clipboard.writeText(url);
+      setWebSaveMessage("Shareable web link copied.");
+    }
   }
 
   return (
@@ -1371,27 +1610,27 @@ export default function Home() {
           <Link className="text-neutral-500" href="/wordbank">
             Saved
           </Link>
-          <a className="text-neutral-500" href="#">
-            Lists
-          </a>
-          <a className="text-neutral-500" href="#">
-            History
-          </a>
         </nav>
 
-        <div className="flex min-w-[230px] items-center justify-end gap-6 text-xl">
-          <button type="button" title="Theme" className="leading-none">
-            *
+        <div className="relative flex min-w-[80px] items-center justify-end gap-3 md:min-w-[230px]">
+          <button
+            type="button"
+            className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm md:hidden"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-navigation"
+            onClick={() => setMobileMenuOpen((open) => !open)}
+          >
+            Menu
           </button>
-          <button type="button" title="Help" className="text-base leading-none">
-            ?
-          </button>
-          <button type="button" title="Notifications" className="leading-none">
-            !
-          </button>
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black font-bold text-white">
+          <div aria-label="Wordsmith guest profile" className="hidden h-10 w-10 items-center justify-center rounded-full bg-black font-bold text-white md:flex">
             W
           </div>
+          {mobileMenuOpen ? (
+            <nav id="mobile-navigation" className="absolute right-0 top-12 z-50 grid w-44 gap-1 rounded-lg border border-neutral-200 bg-white p-2 text-sm shadow-lg md:hidden">
+              <Link className="rounded px-3 py-2 font-semibold hover:bg-neutral-100" href="/">Explore</Link>
+              <Link className="rounded px-3 py-2 hover:bg-neutral-100" href="/wordbank">Saved</Link>
+            </nav>
+          ) : null}
         </div>
       </header>
 
@@ -1408,7 +1647,7 @@ export default function Home() {
           </h2>
 
           <div className="space-y-1.5">
-            {relationOptions.map((option) => (
+            {primaryRelationOptions.map((option) => (
               <button
                 key={option.value}
                 type="button"
@@ -1422,42 +1661,52 @@ export default function Home() {
                 <span className="block">{option.label}</span>
               </button>
             ))}
+            <button
+              type="button"
+              aria-expanded={showMoreRelations}
+              onClick={() => setShowMoreRelations((visible) => !visible)}
+              className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm font-semibold transition hover:bg-neutral-100"
+            >
+              <span>More</span>
+              <span aria-hidden>{showMoreRelations ? "−" : "+"}</span>
+            </button>
+            {showMoreRelations || moreRelationOptions.some((option) => option.value === relationType) ? (
+              <div className="space-y-1 border-l border-neutral-200 pl-2">
+                {moreRelationOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => chooseRelationType(option.value)}
+                    className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${
+                      relationType === option.value
+                        ? "bg-neutral-200 font-semibold"
+                        : "hover:bg-neutral-100"
+                    }`}
+                  >
+                    <span className="block">{option.label}</span>
+                    <span className="block text-[11px] font-normal text-neutral-500">{option.helper}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-4 border-t border-neutral-200 pt-4">
             <h2 className="mb-3 text-xs font-bold uppercase tracking-widest">
-              Filters
+              Exploration Trail
             </h2>
-
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between rounded-md border border-neutral-200 px-3 py-2 text-xs">
-                <span>Part of Speech</span>
-                <span>All</span>
-              </div>
-
-              <div className="flex justify-between rounded-md border border-neutral-200 px-3 py-2 text-xs">
-                <span>Tone</span>
-                <span>All</span>
-              </div>
-
-              <div>
-                <p className="mb-2">Intensity</p>
-                <div className="h-1 rounded-full bg-neutral-300">
-                  <div className="h-1 w-1/2 rounded-full bg-black" />
-                </div>
-                <div className="mt-2 flex justify-between text-xs text-neutral-500">
-                  <span>Low</span>
-                  <span>High</span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-100"
-              >
-                Reset Filters
-              </button>
+            <div className="flex gap-2">
+              <button type="button" disabled={trailIndex <= 0} onClick={() => restoreTrailGraph(trailIndex - 1)} className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm disabled:opacity-40">Back</button>
+              <button type="button" disabled={trailIndex < 0 || trailIndex >= explorationTrail.length - 1} onClick={() => restoreTrailGraph(trailIndex + 1)} className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm disabled:opacity-40">Forward</button>
             </div>
+            <ol className="mt-3 max-h-32 space-y-1 overflow-y-auto text-xs">
+              {explorationTrail.map((graph, index) => (
+                <li key={`${graph.center}-${graph.relationType}-${index}`}>
+                  <button type="button" onClick={() => restoreTrailGraph(index)} className={`w-full truncate rounded px-2 py-1 text-left ${index === trailIndex ? "bg-neutral-200 font-semibold" : "hover:bg-neutral-100"}`}>{graph.center}</button>
+                </li>
+              ))}
+              {explorationTrail.length === 0 ? <li className="text-neutral-500">Your searches and re-centers appear here.</li> : null}
+            </ol>
           </div>
 
           <div className="short-screen-hide mt-4 rounded-lg border border-neutral-200 bg-white/70 p-3 text-sm">
@@ -1475,11 +1724,29 @@ export default function Home() {
           <div className="pointer-events-none absolute inset-0 opacity-45 [background-image:radial-gradient(circle_at_center,#000_1.4px,transparent_1.5px)] [background-size:98px_78px]" />
 
           <div className="relative min-h-0 overflow-hidden">
+            <div className="absolute right-0 top-0 z-30 flex rounded-lg border border-neutral-300 bg-white p-1 text-xs shadow-sm">
+              <button type="button" onClick={() => setViewMode("web")} className={`rounded px-3 py-1.5 ${viewMode === "web" ? "bg-black text-white" : "hover:bg-neutral-100"}`}>Web view</button>
+              <button type="button" onClick={() => setViewMode("list")} className={`rounded px-3 py-1.5 ${viewMode === "list" ? "bg-black text-white" : "hover:bg-neutral-100"}`}>List view</button>
+            </div>
             <div
               ref={graphContainerRef}
               data-wordsmith-graph
-              className="absolute inset-0 h-full min-h-[280px] w-full"
+              aria-hidden={viewMode !== "web"}
+              className={`absolute inset-0 h-full min-h-[280px] w-full ${viewMode === "web" ? "" : "invisible"}`}
             />
+
+            {viewMode === "list" ? (
+              <div className="absolute inset-0 overflow-y-auto px-2 pb-4 pt-12" role="list" aria-label={`Results related to ${centerPhrase}`}>
+                {currentNodes.length > 0 ? currentNodes.map((node) => (
+                  <div key={node.id} role="listitem">
+                  <button type="button" onClick={() => setSelectedNode(node)} className="mb-2 grid w-full grid-cols-[minmax(0,1fr)_auto] gap-4 rounded-lg border border-neutral-200 bg-white/90 p-3 text-left hover:border-neutral-400 focus:outline-2 focus:outline-black">
+                    <span><span className="block font-semibold">{node.label}</span><span className="line-clamp-2 text-xs text-neutral-600">{node.definition ?? node.relationshipExplanation ?? "No definition available."}</span></span>
+                    <span className="text-xs text-neutral-500">{node.relevance ?? "Exploratory"}</span>
+                  </button>
+                  </div>
+                )) : <div className="mx-auto mt-16 max-w-md rounded-lg border border-neutral-200 bg-white/90 p-6 text-center"><p className="font-semibold">Search a word or phrase to build a real word web.</p><p className="mt-2 text-sm text-neutral-600">Try “lonely,” “new beginning,” or “light.”</p></div>}
+              </div>
+            ) : null}
 
             <div className="absolute bottom-0 left-0 z-20 flex flex-col overflow-hidden rounded-lg border border-neutral-300 bg-white/85 shadow-sm">
               <button
@@ -1511,13 +1778,29 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex min-h-0 items-end justify-center gap-2 overflow-hidden">
+          <div className="flex min-h-0 flex-col items-center justify-end gap-1 overflow-hidden">
+            {relationType === "rhymes" ? (
+              <div className="flex max-w-full flex-nowrap justify-center gap-1 overflow-x-auto" aria-label="Rhyme mode">
+                {rhymeModeOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => chooseRhymeMode(option.value)}
+                    aria-pressed={rhymeMode === option.value}
+                    className={`whitespace-nowrap rounded-md border px-2.5 py-1 text-[11px] transition ${rhymeMode === option.value ? "border-black bg-neutral-800 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100"}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="flex items-end justify-center gap-2">
             <p className="mr-2 hidden text-[11px] font-semibold uppercase tracking-widest text-neutral-500 2xl:block">
               Choose an association type
             </p>
 
             <div className="flex flex-nowrap justify-center gap-2">
-              {relationOptions.map((option) => (
+              {primaryRelationOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -1531,6 +1814,7 @@ export default function Home() {
                   {option.label}
                 </button>
               ))}
+            </div>
             </div>
           </div>
 
@@ -1557,7 +1841,9 @@ export default function Home() {
             >
               {isSearching ? "Searching" : "Search"}
             </button>
+            <p className="sr-only" aria-live="polite">{isSearching ? "Finding related words and building connections." : searchError}</p>
           </form>
+          {searchError ? <p className="absolute bottom-0 left-1/2 z-30 -translate-x-1/2 rounded bg-red-50 px-3 py-1 text-xs text-red-800" role="alert">{searchError} <button type="button" className="font-semibold underline" onClick={() => void performSearch(searchTerm || centerPhrase, relationType)}>Retry</button></p> : null}
         </section>
 
         <aside className="wordsmith-details-panel min-h-0 overflow-y-auto rounded-lg border border-neutral-200 bg-white/70 p-5 shadow-sm">
@@ -1576,7 +1862,7 @@ export default function Home() {
           </div>
 
           <h3 className="break-words text-2xl font-bold leading-tight">
-            {selectedNode ? selectedNode.label : centerPhrase}
+            {detailNode?.label ?? centerPhrase}
           </h3>
 
           {recenterMessage && !selectedNode ? (
@@ -1591,51 +1877,42 @@ export default function Home() {
               </span>
             </div>
 
-            <div>
+            {detailNode?.definition ? <div>
               <p className="mb-1 font-semibold">Definition</p>
-              <p className="text-neutral-700">
-                {selectedNode
-                  ? selectedNode.definition
-                  : "Click an outside node to see its popup details."}
-              </p>
-            </div>
+              <p className="text-neutral-700">{detailNode.definition}</p>
+              {detailNode.definitions && detailNode.definitions.length > 1 ? <ul className="mt-2 list-inside list-disc text-xs text-neutral-600">{detailNode.definitions.slice(1, 3).map((definition) => <li key={definition}>{definition}</li>)}</ul> : null}
+            </div> : null}
 
-            <div>
+            {detailNode?.example ? <div>
               <p className="mb-1 font-semibold">Example</p>
-              <p className="text-neutral-700">
-                {selectedNode
-                  ? selectedNode.example
-                  : "Node details will include the word, relation type, definition, example, and actions."}
-              </p>
-            </div>
+              <p className="text-neutral-700">{detailNode.example}</p>
+            </div> : null}
 
             <div className="wordsmith-detail-meta-grid grid grid-cols-2 gap-3">
-              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+              {detailNode?.tone ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   Tone
                 </p>
                 <span className="inline-flex max-w-full rounded-md bg-neutral-200 px-2 py-1 text-xs">
-                  {selectedNode ? selectedNode.tone : "Center"}
+                  {detailNode.tone}
                 </span>
-              </div>
+              </div> : null}
 
-              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+              {detailNode?.partOfSpeech ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   Part of Speech
                 </p>
                 <p className="truncate text-neutral-700">
-                  {selectedNode ? selectedNode.partOfSpeech : "Phrase"}
+                  {detailNode.partOfSpeech}
                 </p>
-              </div>
+              </div> : null}
 
               <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   Source
                 </p>
                 <p className="truncate text-neutral-700">
-                  {selectedNode
-                    ? selectedNode.source ?? graphSourceLabel
-                    : graphSourceLabel}
+                  {detailNode?.source ?? graphSourceLabel}
                 </p>
               </div>
 
@@ -1644,10 +1921,28 @@ export default function Home() {
                   Strength
                 </p>
                 <p className="truncate text-neutral-700">
-                  {selectedNode ? `${selectedNode.strength}/100` : "Center"}
+                  {selectedNode ? detailNode?.relevance ?? "Exploratory" : "Center"}
                 </p>
               </div>
+              {detailNode?.pronunciation ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Pronunciation</p><p className="truncate text-neutral-700">{detailNode.pronunciation}</p></div> : null}
+              {detailNode?.syllableCount ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Syllables</p><p className="text-neutral-700">{detailNode.syllableCount}</p></div> : null}
             </div>
+            {detailNode?.rhymeData ? (
+              <div className="space-y-3 rounded-lg border border-neutral-200 bg-white/55 p-3">
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div><p className="font-semibold uppercase tracking-wide text-neutral-500">Rhyme type</p><p className="mt-1 capitalize">{detailNode.rhymeData.relationship.replaceAll("-", " ")}</p></div>
+                  <div><p className="font-semibold uppercase tracking-wide text-neutral-500">Rhyme score</p><p className="mt-1">{detailNode.strength}/100</p></div>
+                </div>
+                <div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Stress pattern</p><p className="mt-1 font-mono text-xs">{detailNode.rhymeData.stressPattern.join(" ")}</p></div>
+                <div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Rhyme tail</p><p className="mt-1 break-words font-mono text-xs">{detailNode.rhymeData.rhymeTail.join(" ")}</p></div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                  <p>Ending: {Math.round(detailNode.rhymeData.scoreBreakdown.endingSimilarity * 100)}</p>
+                  <p>Multisyllabic: {Math.round(detailNode.rhymeData.scoreBreakdown.multisyllabic * 100)}</p>
+                  <p>Assonance: {Math.round(detailNode.rhymeData.scoreBreakdown.assonance * 100)}</p>
+                  <p>Consonance: {Math.round(detailNode.rhymeData.scoreBreakdown.consonance * 100)}</p>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-5 border-t border-neutral-200 pt-4">
@@ -1655,7 +1950,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={recenterSelectedNode}
-                disabled={!selectedNode}
+                disabled={!selectedNode || isSearching}
                 className="rounded-lg border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-300 disabled:bg-neutral-200 disabled:text-neutral-500"
               >
                 Re-center
@@ -1673,9 +1968,11 @@ export default function Home() {
 
             <p className="mt-3 text-xs text-neutral-500">
               {selectedNode
-                ? saveMessage || "Use Re-center to explore from this node."
+                ? expandingNodeId === selectedNode.id
+                  ? "Expanding this rhyme branch..."
+                  : saveMessage || (relationType === "rhymes" ? "This node expands automatically when selected." : "Use Re-center to explore from this node.")
                 : recenterMessage
-                  ? "A fresh fake related-word web is now displayed."
+                  ? "The new live word web is ready."
                 : "Select a graph node to enable actions."}
             </p>
           </div>
@@ -1690,7 +1987,7 @@ export default function Home() {
       >
         <div className="rounded-lg border border-neutral-200 bg-white/65 px-4 py-3 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-widest">
-            {currentNodes.length + 1} Nodes
+            {isShowingLiveGraph ? currentNodes.length + 1 : 0} Nodes
           </p>
           <p className="text-xs text-neutral-600">{graphSourceLabel}</p>
         </div>
@@ -1698,17 +1995,20 @@ export default function Home() {
         <p className="text-center text-neutral-600">
           {webSaveMessage ||
             (isSearching
-            ? "Searching Datamuse..."
+            ? "Finding related words and building connections..."
             : searchError ||
               (isShowingLiveGraph
-                ? `Live Datamuse results for "${centerPhrase}".`
-                : "Drag to pan. Scroll to zoom. Click a dot or label."))}
+                 ? currentNodes.length > 0
+                   ? `Live results for "${centerPhrase}".`
+                   : "No additional useful results found. Try another relationship type."
+                 : "Search to build a live word web."))}
         </p>
 
         <div className="flex justify-end gap-2">
           <button
             type="button"
             onClick={saveCurrentWeb}
+            disabled={!isShowingLiveGraph}
             className="rounded-lg border border-neutral-300 bg-white/70 px-4 py-2 hover:bg-neutral-100"
           >
             Save Web
@@ -1716,6 +2016,8 @@ export default function Home() {
 
           <button
             type="button"
+            onClick={() => void shareCurrentWeb()}
+            disabled={!isShowingLiveGraph}
             className="rounded-lg border border-neutral-300 bg-white/70 px-4 py-2 hover:bg-neutral-100"
           >
             Share
