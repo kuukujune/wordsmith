@@ -9,9 +9,12 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare:rhyme-data": "tsx --conditions=react-server scripts/prepare-rhyme-data.ts"
+    "prepare:rhyme-data": "tsx --conditions=react-server scripts/prepare-rhyme-data.ts",
+    "prepare:meaning-data": "tsx --conditions=react-server scripts/prepare-semantic-index.ts",
+    "prepare:meaning-model": "tsx --conditions=react-server scripts/prepare-meaning-model.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
     "cmu-pronouncing-dictionary": "^3.0.0",
     "cytoscape": "^3.34.0",
     "next": "16.2.9",
@@ -20,7 +23,9 @@
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",
     "subtlex-word-frequencies": "^2.0.0",
-    "wordlist-english": "^1.2.1"
+    "wordlist-english": "^1.2.1",
+    "wordnet-db": "^3.1.14",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

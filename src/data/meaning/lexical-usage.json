@@ -1,0 +1,12 @@
+[
+  {"query":"freedom","text":"liberty","relationship":"synonym","definition":"Freedom to act, choose, or live without oppressive restraint.","senseContains":"externally imposed","explanation":"Liberty is a synonym for freedom in personal choice and civil rights; WordNet also distinguishes narrower political senses."},
+  {"query":"freedom","text":"autonomy","relationship":"near-synonym","definition":"The ability to govern oneself and make independent choices.","senseContains":"externally imposed","explanation":"Autonomy shares freedom's idea of self-directed choice, with emphasis on self-government."},
+  {"query":"happy","text":"joyful","relationship":"near-synonym","definition":"Feeling or expressing great happiness.","senseContains":"joy or pleasure","explanation":"Joyful is a near-synonym for happy, usually suggesting a stronger or more expressive feeling."},
+  {"query":"hope","text":"optimism","relationship":"near-synonym","definition":"A positive expectation about future outcomes.","senseContains":"hope","explanation":"Optimism shares hope's positive expectation, while describing a broader outlook."},
+  {"query":"dog","text":"animal","relationship":"broader-concept","definition":"A living organism that feeds on organic matter.","senseContains":"Canis","explanation":"Animal is an umbrella category containing dogs, through WordNet's canine and mammal hierarchy."},
+  {"query":"animal","text":"dog","relationship":"narrower-concept","definition":"A domesticated canine.","senseContains":"living organism","explanation":"A dog is a specific kind of animal, within the canine and mammal categories."},
+  {"query":"grief","text":"emotion","relationship":"broader-concept","definition":"A mental feeling or emotional state.","senseContains":"sorrow","explanation":"Grief is a particular emotional state, so emotion is a broader category."},
+  {"query":"emotion","text":"grief","relationship":"narrower-concept","definition":"Deep sorrow, especially following bereavement.","senseContains":"feeling","explanation":"Grief is one specific kind of emotion."},
+  {"query":"piano","text":"instrument","relationship":"broader-concept","definition":"A device used to produce musical sounds.","senseContains":"keyboard","explanation":"A piano is a keyboard musical instrument."},
+  {"query":"instrument","text":"piano","relationship":"narrower-concept","definition":"A keyboard musical instrument whose strings are struck by hammers.","senseContains":"musical","explanation":"Piano is a particular kind of musical instrument."}
+]

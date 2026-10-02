@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/.cache/
+src/data/meaning/*.tmp
 
 # next.js
 /.next/

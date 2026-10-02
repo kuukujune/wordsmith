@@ -47,7 +47,7 @@ function readStoredItems<T>(key: string): T[] {
 
   try {
     const parsedItems = JSON.parse(storedItems) as T[];
-    return Array.isArray(parsedItems) ? parsedItems : [];
+    return Array.isArray(parsedItems) ? parsedItems.filter(item => item && typeof item === "object" && "id" in item && typeof item.id === "string" && "savedAt" in item && typeof item.savedAt === "string") : [];
   } catch {
     window.localStorage.removeItem(key);
     return [];
@@ -55,6 +55,7 @@ function readStoredItems<T>(key: string): T[] {
 }
 
 function formatSavedDate(value: string) {
+  if (!Number.isFinite(new Date(value).getTime())) return "Date unavailable";
   return new Intl.DateTimeFormat("en", {
     month: "short",
     day: "numeric",

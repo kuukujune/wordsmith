@@ -3,8 +3,11 @@
 import type { Core, EventObject, StylesheetJson } from "cytoscape";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { RhymeMode, RhymeResult, RhymeScoreBreakdown, RhymeSearchResponse } from "@/lib/rhyme/types";
+import type { RhymeMode, RhymeSearchResponse } from "@/lib/rhyme/types";
 import { createRhymeGraph, expansionElements } from "@/lib/rhyme/graph-adapter";
+import type { WordNode, RelationType, WordSearchResponse, SavedWord, SavedWeb } from "@/lib/graph-types";
+import type { MeaningMode, MeaningSearchResponse } from "@/lib/meaning/types";
+import { createMeaningGraph, expandMeaningGraph } from "@/lib/meaning/graph-adapter";
 import { updateExplorationTrail } from "@/lib/search-logic";
 
 const relationOptions = [
@@ -38,79 +41,8 @@ const relationOptions = [
 const primaryRelationOptions = relationOptions.slice(0, 3);
 const moreRelationOptions = relationOptions.slice(3);
 
-type RelationType = (typeof relationOptions)[number]["value"];
-
-type WordNode = {
-  id: string;
-  label: string;
-  relationType?: RelationType;
-  definitions?: string[];
-  definition?: string;
-  example?: string;
-  tone?: string;
-  partOfSpeech?: string;
-  pronunciation?: string;
-  syllableCount?: number;
-  relationshipExplanation?: string;
-  relevance?: "Strong" | "Moderate" | "Exploratory";
-  strength: number;
-  source?: string;
-  parentId?: string;
-  depth?: number;
-  rhymeData?: {
-    relationship: RhymeResult["relationship"];
-    syllableCount: number;
-    stressPattern: number[];
-    phonemes: string[];
-    rhymeTail: string[];
-    scoreBreakdown: RhymeScoreBreakdown;
-  };
-};
-
-type GraphEdge = {
-  id: string;
-  source: string;
-  target: string;
-};
-
-type WordSearchResponse = {
-  center: string;
-  centerNode?: WordNode;
-  relationType: RelationType;
-  nodes: WordNode[];
-  edges: GraphEdge[];
-  source: string;
-  rhymeMode?: RhymeMode;
-};
-
-type SavedWord = {
-  id: string;
-  word: string;
-  relationType: string;
-  centerWord: string;
-  definition?: string;
-  example?: string;
-  savedAt: string;
-};
-
-type SavedWeb = {
-  id: string;
-  title: string;
-  centerWord: string;
-  relationType: string;
-  relationValue: RelationType;
-  source: string;
-  nodeCount: number;
-  nodes: WordNode[];
-  edges: GraphEdge[];
-  centerNode?: WordNode;
-  rhymeMode?: RhymeMode;
-  savedAt: string;
-};
-
 const savedWordsStorageKey = "wordsmith.savedWords";
 const savedWebsStorageKey = "wordsmith.savedWebs";
-const firstRingNodeCount = 8;
 const totalGraphNodeLimit = 50;
 const relatedNodeLimit = totalGraphNodeLimit - 1;
 const compactLayoutBreakpoint = 900;
@@ -123,6 +55,10 @@ const desktopWorkspaceRows = "minmax(0, 1fr)";
 const compactWorkspaceRows = "152px minmax(0, 1fr) 190px";
 const desktopGraphRows = "minmax(0, 1fr) 42px 58px";
 const compactGraphRows = "minmax(0, 1fr) 34px 52px";
+
+const meaningModeOptions: Array<{ value: MeaningMode; label: string }> = [
+  { value: "auto", label: "All" }, { value: "synonym", label: "Synonyms" }, { value: "related", label: "Related" }, { value: "broader", label: "Broader" }, { value: "narrower", label: "More specific" }, { value: "contrast", label: "Contrasts" }, { value: "imagery", label: "Imagery" }, { value: "rephrasing", label: "Rephrasings" },
+];
 
 const rhymeModeOptions: Array<{ value: RhymeMode; label: string }> = [
   { value: "auto", label: "All" },
@@ -137,451 +73,9 @@ function rhymeResponseToGraph(response: RhymeSearchResponse): WordSearchResponse
   return createRhymeGraph(response);
 }
 
-const sampleNodes: WordNode[] = [
-  {
-    id: "following-the-light",
-    label: "following the light",
-    definition: "Moving toward hope, clarity, or a better future.",
-    example: "Even after the setback, she kept following the light.",
-    tone: "Hopeful",
-    partOfSpeech: "Phrase",
-    strength: 96,
-  },
-  {
-    id: "new-beginnings",
-    label: "new beginnings",
-    definition: "Fresh starts or the beginning of a new stage.",
-    example: "The move felt like a season of new beginnings.",
-    tone: "Optimistic",
-    partOfSpeech: "Phrase",
-    strength: 94,
-  },
-  {
-    id: "morning-light",
-    label: "morning light",
-    definition: "Early light that suggests peace or renewal.",
-    example: "The morning light spilled across the quiet room.",
-    tone: "Gentle",
-    partOfSpeech: "Phrase",
-    strength: 92,
-  },
-  {
-    id: "pursuing-possibility",
-    label: "pursuing possibility",
-    definition: "Chasing what could happen instead of staying still.",
-    example: "He left home pursuing possibility.",
-    tone: "Aspirational",
-    partOfSpeech: "Phrase",
-    strength: 90,
-  },
-  {
-    id: "starting-over",
-    label: "starting over",
-    definition: "Beginning again after change, loss, or failure.",
-    example: "Starting over was scary, but it gave him freedom.",
-    tone: "Reflective",
-    partOfSpeech: "Phrase",
-    strength: 89,
-  },
-  {
-    id: "toward-something-better",
-    label: "toward something better",
-    definition: "Moving in the direction of improvement or hope.",
-    example: "Every choice pulled her toward something better.",
-    tone: "Hopeful",
-    partOfSpeech: "Phrase",
-    strength: 88,
-  },
-  {
-    id: "quiet-dawn",
-    label: "quiet dawn",
-    definition: "A calm early morning, often suggesting peace.",
-    example: "At quiet dawn, the city seemed almost forgiving.",
-    tone: "Peaceful",
-    partOfSpeech: "Phrase",
-    strength: 87,
-  },
-  {
-    id: "rising-again",
-    label: "rising again",
-    definition: "Recovering after difficulty or defeat.",
-    example: "After months of doubt, he was rising again.",
-    tone: "Resilient",
-    partOfSpeech: "Phrase",
-    strength: 86,
-  },
-  {
-    id: "chasing-daylight",
-    label: "chasing daylight",
-    definition: "Trying to reach hope, time, or opportunity.",
-    example: "They drove west, chasing daylight across the highway.",
-    tone: "Urgent",
-    partOfSpeech: "Phrase",
-    strength: 85,
-  },
-  {
-    id: "beyond-the-horizon",
-    label: "beyond the horizon",
-    definition: "Something unknown, distant, or full of possibility.",
-    example: "Her dreams waited somewhere beyond the horizon.",
-    tone: "Expansive",
-    partOfSpeech: "Phrase",
-    strength: 84,
-  },
-  {
-    id: "first-light",
-    label: "first light",
-    definition: "The earliest light of morning.",
-    example: "They reached the shore at first light.",
-    tone: "Clean",
-    partOfSpeech: "Phrase",
-    strength: 83,
-  },
-  {
-    id: "open-road",
-    label: "open road",
-    definition: "Freedom, movement, travel, or escape.",
-    example: "The open road made him feel possible again.",
-    tone: "Free",
-    partOfSpeech: "Phrase",
-    strength: 82,
-  },
-  {
-    id: "hope-in-motion",
-    label: "hope in motion",
-    definition: "Hope shown through action.",
-    example: "Her work was hope in motion.",
-    tone: "Inspirational",
-    partOfSpeech: "Phrase",
-    strength: 81,
-  },
-  {
-    id: "brighter-distance",
-    label: "brighter distance",
-    definition: "A future that seems better than the present.",
-    example: "He kept his eyes fixed on a brighter distance.",
-    tone: "Longing",
-    partOfSpeech: "Phrase",
-    strength: 80,
-  },
-  {
-    id: "golden-hour",
-    label: "golden hour",
-    definition: "A warm time near sunrise or sunset.",
-    example: "The golden hour made everything look forgiven.",
-    tone: "Warm",
-    partOfSpeech: "Phrase",
-    strength: 79,
-  },
-  {
-    id: "wake-the-dream",
-    label: "wake the dream",
-    definition: "To bring an old hope back to life.",
-    example: "The song seemed to wake the dream inside him.",
-    tone: "Creative",
-    partOfSpeech: "Phrase",
-    strength: 78,
-  },
-  {
-    id: "finding-clarity",
-    label: "finding clarity",
-    definition: "Beginning to understand something clearly.",
-    example: "After the conversation, she was finding clarity.",
-    tone: "Calm",
-    partOfSpeech: "Phrase",
-    strength: 77,
-  },
-  {
-    id: "light-through-clouds",
-    label: "light through clouds",
-    definition: "Hope appearing during difficulty.",
-    example: "His kindness was light through clouds.",
-    tone: "Tender",
-    partOfSpeech: "Phrase",
-    strength: 76,
-  },
-  {
-    id: "tomorrow-calling",
-    label: "tomorrow calling",
-    definition: "The feeling that the future is asking you forward.",
-    example: "She could hear tomorrow calling from the platform.",
-    tone: "Forward-looking",
-    partOfSpeech: "Phrase",
-    strength: 75,
-  },
-  {
-    id: "soft-arrival",
-    label: "soft arrival",
-    definition: "A gentle entrance into a new place or feeling.",
-    example: "The morning came as a soft arrival.",
-    tone: "Gentle",
-    partOfSpeech: "Phrase",
-    strength: 74,
-  },
-  {
-    id: "brave-morning",
-    label: "brave morning",
-    definition: "A new day faced with courage.",
-    example: "It was a brave morning after a sleepless night.",
-    tone: "Courageous",
-    partOfSpeech: "Phrase",
-    strength: 73,
-  },
-  {
-    id: "restless-hope",
-    label: "restless hope",
-    definition: "Hope that pushes someone to keep moving.",
-    example: "Restless hope kept him awake past midnight.",
-    tone: "Restless",
-    partOfSpeech: "Phrase",
-    strength: 72,
-  },
-  {
-    id: "sunlit-path",
-    label: "sunlit path",
-    definition: "A clear and hopeful direction forward.",
-    example: "For once, the choice looked like a sunlit path.",
-    tone: "Clear",
-    partOfSpeech: "Phrase",
-    strength: 71,
-  },
-  {
-    id: "faith-in-the-day",
-    label: "faith in the day",
-    definition: "Trust that the new day will bring something worthwhile.",
-    example: "She packed her bag with faith in the day.",
-    tone: "Faithful",
-    partOfSpeech: "Phrase",
-    strength: 70,
-  },
-  {
-    id: "edge-of-morning",
-    label: "edge of morning",
-    definition: "The border between night and day.",
-    example: "They spoke honestly at the edge of morning.",
-    tone: "Transitional",
-    partOfSpeech: "Phrase",
-    strength: 69,
-  },
-  {
-    id: "begin-again",
-    label: "begin again",
-    definition: "To restart with renewed effort or hope.",
-    example: "Tomorrow, he would begin again.",
-    tone: "Renewed",
-    partOfSpeech: "Phrase",
-    strength: 68,
-  },
-  {
-    id: "lifted-by-light",
-    label: "lifted by light",
-    definition: "Comforted or emotionally raised by hope.",
-    example: "She felt lifted by light after weeks of sadness.",
-    tone: "Comforted",
-    partOfSpeech: "Phrase",
-    strength: 67,
-  },
-  {
-    id: "after-the-dark",
-    label: "after the dark",
-    definition: "The time after hardship or sadness.",
-    example: "After the dark, even small joys felt enormous.",
-    tone: "Healing",
-    partOfSpeech: "Phrase",
-    strength: 66,
-  },
-  {
-    id: "promise-of-morning",
-    label: "promise of morning",
-    definition: "The hope suggested by a new day.",
-    example: "The promise of morning kept him going.",
-    tone: "Hopeful",
-    partOfSpeech: "Phrase",
-    strength: 65,
-  },
-  {
-    id: "reaching-for-dawn",
-    label: "reaching for dawn",
-    definition: "Trying to move toward relief or a new beginning.",
-    example: "All night, she felt like she was reaching for dawn.",
-    tone: "Yearning",
-    partOfSpeech: "Phrase",
-    strength: 64,
-  },
-];
-
 function normalizePhrase(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
-
-function createNodeId(centerPhrase: string, label: string, index: number) {
-  const slug = `${centerPhrase}-${label}-${index}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-
-  return slug || `node-${index}`;
-}
-
-function createSampleNode(
-  centerPhrase: string,
-  label: string,
-  index: number,
-  parentId = "center",
-  depth = 1
-): WordNode {
-  const tones = [
-    "Reflective",
-    "Hopeful",
-    "Gentle",
-    "Searching",
-    "Aspirational",
-    "Grounded",
-  ];
-
-  return {
-    id: createNodeId(centerPhrase, label, index),
-    label,
-    definition: `A curated example phrase connected to "${centerPhrase}".`,
-    example: `She wrote "${label}" beside "${centerPhrase}" while looking for a better line.`,
-    tone: tones[index % tones.length],
-    partOfSpeech: "Phrase",
-    strength: Math.max(62, 98 - index),
-    parentId,
-    depth,
-  };
-}
-
-function buildSampleRelatedNodes(centerPhrase: string, relationType: RelationType) {
-  const meaningTemplates = [
-    "the heart of {word}",
-    "what {word} is reaching for",
-    "{word} in another light",
-    "the quiet meaning of {word}",
-    "{word} beneath the surface",
-    "the feeling inside {word}",
-    "a softer version of {word}",
-    "the promise behind {word}",
-    "{word} made plain",
-    "the ache inside {word}",
-  ];
-
-  const rhymeTemplates = [
-    "{word} in time",
-    "{word} in rhyme",
-    "{word} by design",
-    "{word} on the line",
-    "{word} made mine",
-    "{word} and shine",
-    "{word} through the vine",
-    "{word} as a sign",
-    "{word} past decline",
-    "{word} in fine outline",
-  ];
-
-  const soundTemplates = [
-    "echoes of {word}",
-    "{word} whispered differently",
-    "near-sound of {word}",
-    "{word} with a softer edge",
-    "{word} in another voice",
-    "almost saying {word}",
-    "{word} with a turn",
-    "the sound beside {word}",
-    "{word} rephrased aloud",
-    "a close call to {word}",
-  ];
-
-  const associatedTemplates = [
-    "{word} and the road ahead",
-    "{word} in the margin",
-    "{word} after midnight",
-    "{word} with open hands",
-    "{word} beside the window",
-    "{word} at first light",
-    "{word} before the answer",
-    "{word} on a blank page",
-    "{word} with a second chance",
-    "{word} moving forward",
-  ];
-
-  const toneTemplates = [
-    "{word} but hopeful",
-    "{word} but tender",
-    "{word} but restless",
-    "{word} but bright",
-    "{word} but uncertain",
-    "{word} but brave",
-    "{word} but calm",
-    "{word} but urgent",
-    "{word} but forgiving",
-    "{word} but alive",
-  ];
-
-  const templatesByRelation: Record<RelationType, string[]> = {
-    meaning: meaningTemplates,
-    rhymes: rhymeTemplates,
-    "sounds-like": soundTemplates,
-    "associated-phrases": associatedTemplates,
-    "tone-theme": toneTemplates,
-  };
-
-  const templates = templatesByRelation[relationType];
-  const labels = Array.from({ length: relatedNodeLimit }, (_, index) => {
-    const template = templates[index % templates.length];
-    const cycle = Math.floor(index / templates.length);
-    const suffixes = ["", " again", " unfolding", " remembered", " returning"];
-
-    return `${template.replace("{word}", centerPhrase)}${suffixes[cycle]}`;
-  });
-
-  const sourceNodes =
-    normalizePhrase(centerPhrase) === "chasing the sunrise"
-      ? sampleNodes
-      : labels.map((label, index) => createSampleNode(centerPhrase, label, index));
-
-  const firstRingNodes = [...sourceNodes]
-    .sort((first, second) => second.strength - first.strength)
-    .slice(0, firstRingNodeCount)
-    .map((node, index) => ({
-      ...node,
-      id: createNodeId(centerPhrase, node.label, index),
-      parentId: "center",
-      depth: 1,
-    }));
-  const nodes: WordNode[] = [...firstRingNodes];
-  const remainingNodeSlots = relatedNodeLimit - firstRingNodes.length;
-  const baseChildCount = Math.floor(
-    remainingNodeSlots / Math.max(firstRingNodes.length, 1)
-  );
-  let extraChildSlots = remainingNodeSlots % Math.max(firstRingNodes.length, 1);
-
-  firstRingNodes.forEach((parentNode, parentIndex) => {
-    const childLimit = baseChildCount + (extraChildSlots > 0 ? 1 : 0);
-    extraChildSlots = Math.max(0, extraChildSlots - 1);
-
-    Array.from({ length: childLimit }, (_, childIndex) => {
-      const template = templates[(parentIndex + childIndex) % templates.length];
-      const label = template.replace("{word}", parentNode.label);
-      const nodeIndex = nodes.length;
-
-      nodes.push(
-        createSampleNode(
-          parentNode.label,
-          label,
-          nodeIndex,
-          parentNode.id,
-          2
-        )
-      );
-    });
-  });
-
-  return nodes.slice(0, relatedNodeLimit);
-}
-
-// Retained only as non-live design fixture data; search and error flows never use it.
-void buildSampleRelatedNodes;
 
 function buildEdgesFromNodes(nodes: WordNode[]) {
   return nodes.map((node) => {
@@ -654,7 +148,7 @@ function createSpiderWebLayout(centerPhrase: string, nodes: WordNode[]) {
   const firstRingNodes = nodes
     .filter((node) => (node.parentId ?? "center") === "center")
     .sort((first, second) => second.strength - first.strength)
-    .slice(0, firstRingNodeCount);
+    .slice(0, 30);
   const maxFirstRingLabelRadius = Math.max(
     70,
     ...firstRingNodes.map((node) => boxes.get(node.id)?.radius ?? 70)
@@ -668,8 +162,8 @@ function createSpiderWebLayout(centerPhrase: string, nodes: WordNode[]) {
     const angle = (2 * Math.PI * index) / Math.max(firstRingNodes.length, 1) - Math.PI / 2;
 
     positions[node.id] = {
-      x: centerX + Math.cos(angle) * firstRingRadius,
-      y: centerY + Math.sin(angle) * firstRingRadius,
+      x: centerX + Math.cos(angle) * (firstRingRadius + (node.meaningData ? Math.max(0, 100 - node.strength) * 2 : 0)),
+      y: centerY + Math.sin(angle) * (firstRingRadius + (node.meaningData ? Math.max(0, 100 - node.strength) * 2 : 0)),
     };
 
     const childNodes = nodes
@@ -697,6 +191,12 @@ function createSpiderWebLayout(centerPhrase: string, nodes: WordNode[]) {
     });
   });
 
+  for (const node of [...nodes].sort((a, b) => (a.depth ?? 1) - (b.depth ?? 1))) {
+    if (positions[node.id]) continue;
+    const parent = positions[node.parentId ?? "center"] ?? positions.center;
+    const angle = Math.atan2(parent.y - centerY, parent.x - centerX) + (nodes.indexOf(node) % 5 - 2) * .32;
+    positions[node.id] = { x: parent.x + Math.cos(angle) * 200, y: parent.y + Math.sin(angle) * 200 };
+  }
   const movableNodes = nodes.filter((node) => positions[node.id]);
 
   for (let iteration = 0; iteration < 110; iteration += 1) {
@@ -855,6 +355,10 @@ const graphStylesheet = [
       "curve-style": "straight",
     },
   },
+  { selector: ".meaning-synonym, .meaning-near-synonym, .meaning-related-concept, .meaning-broader-concept, .meaning-narrower-concept, .meaning-contrast, .meaning-symbolic-association, .meaning-imagery-association, .meaning-rephrasing", style: { label: "data(semanticLabel)", "font-size": 8, "text-background-color": "#faf9f6", "text-background-opacity": .9, "text-rotation": "autorotate" } },
+  { selector: ".meaning-near-synonym, .meaning-contrast", style: { "line-style": "dashed" } },
+  { selector: ".meaning-symbolic-association, .meaning-imagery-association", style: { "line-style": "dotted" } },
+  { selector: ".meaning-broader-concept", style: { width: 2.5 } },
   { selector: ".rhyme-near", style: { "line-style": "dashed" } },
   { selector: ".rhyme-multisyllabic", style: { width: 2.4 } },
   { selector: ".rhyme-assonance", style: { "line-style": "dotted" } },
@@ -905,6 +409,10 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState("");
   const [centerPhrase, setCenterPhrase] = useState("Wordsmith");
   const [relationType, setRelationType] = useState<RelationType>("meaning");
+  const [meaningMode, setMeaningMode] = useState<MeaningMode>("auto");
+  const meaningExpansionKeys = useRef(new Set<string>());
+  const meaningExpansionControllers = useRef(new Map<string, AbortController>());
+  const [expandingMeaningNodes, setExpandingMeaningNodes] = useState<Set<string>>(() => new Set());
   const [rhymeMode, setRhymeMode] = useState<RhymeMode>("auto");
   const [selectedNode, setSelectedNode] = useState<WordNode | null>(null);
   const [recenterMessage, setRecenterMessage] = useState("");
@@ -933,7 +441,7 @@ export default function Home() {
 
     try {
       const parsedWords = JSON.parse(storedWords) as SavedWord[];
-      return Array.isArray(parsedWords) ? parsedWords : [];
+      return Array.isArray(parsedWords) ? parsedWords.filter(item => item && typeof item.id === "string" && typeof item.word === "string") : [];
     } catch {
       window.localStorage.removeItem(savedWordsStorageKey);
       return [];
@@ -952,7 +460,7 @@ export default function Home() {
 
     try {
       const parsedWebs = JSON.parse(storedWebs) as SavedWeb[];
-      return Array.isArray(parsedWebs) ? parsedWebs : [];
+      return Array.isArray(parsedWebs) ? parsedWebs.filter(item => item && typeof item.id === "string" && typeof item.centerWord === "string" && Array.isArray(item.nodes) && item.nodes.every(node => node && typeof node.id === "string" && typeof node.label === "string")) : [];
     } catch {
       window.localStorage.removeItem(savedWebsStorageKey);
       return [];
@@ -984,7 +492,7 @@ export default function Home() {
   const workspaceRows = isCompactLayout
     ? compactWorkspaceRows
     : desktopWorkspaceRows;
-  const graphRows = relationType === "rhymes"
+  const graphRows = relationType === "rhymes" || relationType === "meaning"
     ? isCompactLayout ? "minmax(0, 1fr) 68px 52px" : "minmax(0, 1fr) 78px 58px"
     : isCompactLayout ? compactGraphRows : desktopGraphRows;
   const footerColumns = isCompactLayout
@@ -1002,7 +510,7 @@ export default function Home() {
     async (
       term: string,
       type: RelationType,
-      options: { recordTrail?: boolean; urlMode?: "push" | "replace" | "none"; rhymeModeOverride?: RhymeMode } = {}
+      options: { recordTrail?: boolean; urlMode?: "push" | "replace" | "none"; rhymeModeOverride?: RhymeMode; meaningModeOverride?: MeaningMode; senseId?: string } = {}
     ) => {
       const cleanedTerm = term.trim().replace(/\s+/g, " ");
       if (!cleanedTerm) {
@@ -1011,6 +519,9 @@ export default function Home() {
       }
 
       searchControllerRef.current?.abort();
+      for (const controller of meaningExpansionControllers.current.values()) controller.abort();
+      meaningExpansionControllers.current.clear();
+      setExpandingMeaningNodes(new Set());
       const controller = new AbortController();
       searchControllerRef.current = controller;
       setIsSearching(true);
@@ -1020,7 +531,9 @@ export default function Home() {
 
       try {
         const activeRhymeMode = options.rhymeModeOverride ?? rhymeMode;
-        const response = type === "rhymes"
+        const response = type === "meaning"
+          ? await fetch("/api/meaning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: cleanedTerm, mode: options.meaningModeOverride ?? meaningMode, senseId: options.senseId, limit: 16 }), signal: controller.signal })
+          : type === "rhymes"
           ? await fetch("/api/rhyme", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1031,11 +544,12 @@ export default function Home() {
               `/api/word-search?word=${encodeURIComponent(cleanedTerm)}&relationType=${encodeURIComponent(type)}`,
               { signal: controller.signal }
             );
-        const payload = (await response.json()) as WordSearchResponse | RhymeSearchResponse | { error?: string };
+        const payload = (await response.json()) as WordSearchResponse | RhymeSearchResponse | MeaningSearchResponse | { error?: string };
         if (!response.ok || "error" in payload) {
           throw new Error("error" in payload ? payload.error : "Search failed.");
         }
-        const graph = type === "rhymes"
+        if (controller.signal.aborted) return false;
+        const graph = type === "meaning" ? createMeaningGraph(payload as MeaningSearchResponse) : type === "rhymes"
           ? rhymeResponseToGraph(payload as RhymeSearchResponse)
           : payload as WordSearchResponse;
 
@@ -1043,6 +557,8 @@ export default function Home() {
         setSearchTerm(graph.center);
         setRelationType(graph.relationType);
         setLiveGraph(graph);
+        meaningExpansionKeys.current.clear();
+        if (graph.meaningMode) setMeaningMode(graph.meaningMode);
         setExpandedRhymeKeys(new Set());
         setSelectedNode(null);
         setRecenterMessage("");
@@ -1070,8 +586,38 @@ export default function Home() {
         }
       }
     },
-    [rhymeMode, trailIndex]
+    [meaningMode, rhymeMode, trailIndex]
   );
+
+  const expandMeaningNode = useCallback(async (parent: WordNode) => {
+    if (relationType !== "meaning" || !liveGraph || isSearching || liveGraph.nodes.length >= relatedNodeLimit) return;
+    const key = `${parent.id}:${meaningMode}`;
+    if (meaningExpansionKeys.current.has(key)) return;
+    meaningExpansionKeys.current.add(key);
+    const controller = new AbortController();
+    meaningExpansionControllers.current.set(key, controller);
+    setExpandingMeaningNodes(current => new Set(current).add(parent.id));
+    setExpandingNodeId(parent.id);
+    const originalGraph = liveGraph;
+    try {
+      const response = await fetch("/api/meaning", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ query: parent.label, mode: meaningMode, limit: 8, originalCenter: originalGraph.center, exclude: [originalGraph.center, ...originalGraph.nodes.map(n => n.label)] }) });
+      const payload = await response.json() as MeaningSearchResponse & { error?: string };
+      if (!response.ok || payload.error) throw new Error(payload.error ?? "Expansion failed.");
+      if (controller.signal.aborted) return;
+      setLiveGraph(current => current && current.center === originalGraph.center && current.meaningMode === originalGraph.meaningMode && current.nodes.some(n => n.id === parent.id) ? expandMeaningGraph(current, parent, payload.results, relatedNodeLimit) : current);
+    } catch (error) {
+      meaningExpansionKeys.current.delete(key);
+      if (!(error instanceof Error && error.name === "AbortError")) setSearchError(error instanceof Error ? error.message : "Meaning expansion failed.");
+    } finally {
+      meaningExpansionControllers.current.delete(key);
+      setExpandingMeaningNodes(current => { const next = new Set(current); next.delete(parent.id); return next; });
+      setExpandingNodeId(null);
+    }
+  }, [isSearching, liveGraph, meaningMode, relationType]);
+
+  useEffect(() => {
+    if (selectedNode?.meaningData && relationType === "meaning") queueMicrotask(() => void expandMeaningNode(selectedNode));
+  }, [expandMeaningNode, relationType, selectedNode]);
 
   const expandRhymeNode = useCallback(async (parentNode: WordNode) => {
     if (relationType !== "rhymes" || !liveGraph || liveGraph.nodes.length >= relatedNodeLimit) return;
@@ -1152,6 +698,8 @@ export default function Home() {
           edges: savedWeb.edges ?? buildEdgesFromNodes(savedWeb.nodes),
           source: savedWeb.source,
           rhymeMode: savedWeb.rhymeMode,
+          meaningMode: savedWeb.meaningMode,
+          selectedSenseId: savedWeb.selectedSenseId,
         };
         queueMicrotask(() => {
           setCenterPhrase(graph.center);
@@ -1159,6 +707,7 @@ export default function Home() {
           setRelationType(graph.relationType);
           setLiveGraph(graph);
           setRhymeMode(graph.rhymeMode ?? "auto");
+    setMeaningMode(graph.meaningMode ?? "auto");
           setExplorationTrail([graph]);
           setTrailIndex(0);
           setRecenterMessage(`Reopened saved web “${savedWeb.title}”.`);
@@ -1260,7 +809,7 @@ export default function Home() {
       return {
         data: {
           id: node.id,
-          label: node.label,
+          label: expandingMeaningNodes.has(node.id) ? `${node.label} …` : node.label,
           parentId: node.parentId,
           depth: node.depth,
           strength: node.strength,
@@ -1278,7 +827,8 @@ export default function Home() {
 
     const edges = currentEdges.map((edge) => {
       const relationship = currentNodes.find((node) => node.id === edge.target)?.rhymeData?.relationship;
-      const classes = relationship === "near-rhyme" ? "rhyme-near"
+      const meaningRelationship = currentNodes.find(node => node.id === edge.target)?.meaningData?.relationship;
+      const classes = meaningRelationship ? `meaning-${meaningRelationship}` : relationship === "near-rhyme" ? "rhyme-near"
         : relationship === "multisyllabic-rhyme" ? "rhyme-multisyllabic"
         : relationship === "assonance" ? "rhyme-assonance"
         : relationship === "consonance" ? "rhyme-consonance" : "";
@@ -1286,11 +836,12 @@ export default function Home() {
         id: edge.id,
         source: edge.source,
         target: edge.target,
+        semanticLabel: meaningRelationship?.replaceAll("-", " ") ?? "",
       }, classes };
     });
 
     return [centerNode, ...outerNodes, ...edges];
-  }, [centerPhrase, currentEdges, currentNodes]);
+  }, [centerPhrase, currentEdges, currentNodes, expandingMeaningNodes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1429,7 +980,7 @@ export default function Home() {
     setRecenterMessage("");
     setSaveMessage("");
     setWebSaveMessage("");
-    if (isShowingLiveGraph) void performSearch(centerPhrase, type);
+    if (isShowingLiveGraph) void performSearch(centerPhrase, type).then(success => { if (!success && liveGraph) setRelationType(liveGraph.relationType); });
   }
 
   function chooseRhymeMode(mode: RhymeMode) {
@@ -1507,6 +1058,7 @@ export default function Home() {
     setRelationType(graph.relationType);
     setLiveGraph(graph);
     setRhymeMode(graph.rhymeMode ?? "auto");
+    setMeaningMode(graph.meaningMode ?? "auto");
     setSelectedNode(null);
     setSearchError("");
     window.history.pushState(
@@ -1528,6 +1080,9 @@ export default function Home() {
       centerWord: centerPhrase,
       definition: selectedNode.definition,
       example: selectedNode.example,
+      node: selectedNode,
+      meaningMode,
+      parentText: currentNodes.find(n => n.id === selectedNode.parentId)?.label ?? centerPhrase,
       savedAt: new Date().toISOString(),
     };
 
@@ -1555,6 +1110,8 @@ export default function Home() {
       edges: currentEdges,
       centerNode: liveGraph?.centerNode,
       rhymeMode: liveGraph?.rhymeMode,
+      meaningMode: liveGraph?.meaningMode,
+      selectedSenseId: liveGraph?.selectedSenseId,
       savedAt: new Date().toISOString(),
     };
 
@@ -1779,6 +1336,11 @@ export default function Home() {
           </div>
 
           <div className="flex min-h-0 flex-col items-center justify-end gap-1 overflow-hidden">
+            {relationType === "meaning" ? (
+              <div className="flex max-w-full flex-nowrap gap-1 overflow-x-auto" aria-label="Meaning mode">
+                {meaningModeOptions.map(option => <button key={option.value} type="button" aria-pressed={meaningMode === option.value} className={`whitespace-nowrap rounded-md border px-2 py-1 text-[11px] ${meaningMode === option.value ? "border-black bg-neutral-800 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100"}`} onClick={() => { setMeaningMode(option.value); if (liveGraph) void performSearch(centerPhrase, "meaning", { meaningModeOverride: option.value, senseId: liveGraph.selectedSenseId }); }}>{option.label}</button>)}
+              </div>
+            ) : null}
             {relationType === "rhymes" ? (
               <div className="flex max-w-full flex-nowrap justify-center gap-1 overflow-x-auto" aria-label="Rhyme mode">
                 {rhymeModeOptions.map((option) => (
@@ -1927,6 +1489,19 @@ export default function Home() {
               {detailNode?.pronunciation ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Pronunciation</p><p className="truncate text-neutral-700">{detailNode.pronunciation}</p></div> : null}
               {detailNode?.syllableCount ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Syllables</p><p className="text-neutral-700">{detailNode.syllableCount}</p></div> : null}
             </div>
+            {detailNode?.meaningAnalysis && detailNode.meaningAnalysis.possibleSenses.length > 1 ? <div className="space-y-2"><p className="text-xs font-semibold">Meaning / sense</p>{detailNode.meaningAnalysis.possibleSenses.map(sense => <button type="button" key={sense.id} aria-pressed={liveGraph?.selectedSenseId === sense.id} className={`block w-full rounded border p-2 text-left text-xs ${liveGraph?.selectedSenseId === sense.id ? "border-black bg-neutral-200" : "border-neutral-200"}`} onClick={() => void performSearch(centerPhrase, "meaning", { senseId: sense.id })}>{sense.definition}</button>)}</div> : null}
+            {detailNode?.meaningData ? <div className="space-y-2 rounded-lg border border-neutral-200 p-3 text-xs">
+              <p className="font-semibold capitalize">{detailNode.meaningData.relationship.replaceAll("-", " ")} · {detailNode.strength}/100</p>
+              <p>{detailNode.meaningData.explanation}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <p>Semantic: {Math.round(detailNode.meaningData.scoreBreakdown.embeddingSimilarity)}</p><p>Context: {Math.round(detailNode.meaningData.scoreBreakdown.contextualSimilarity)}</p>
+                <p>Tone: {Math.round(detailNode.meaningData.scoreBreakdown.toneSimilarity)}</p><p>Imagery: {Math.round(detailNode.meaningData.scoreBreakdown.imagerySimilarity)}</p>
+                {detailNode.meaningData.parentSimilarity !== undefined ? <p>Parent relevance: {detailNode.meaningData.parentSimilarity}</p> : null}
+                {detailNode.meaningData.centerSimilarity !== undefined ? <p>Centre relevance: {Math.round(detailNode.meaningData.centerSimilarity)}</p> : null}
+              </div>
+              {detailNode.meaningData.possibleSenseId ? <p>Sense: {liveGraph?.centerNode?.meaningAnalysis?.possibleSenses.find(s => s.id === detailNode.meaningData?.possibleSenseId)?.definition ?? detailNode.meaningData.possibleSenseId}</p> : null}
+            </div> : null}
+            {liveGraph?.warnings?.length ? <p role="status" className="text-xs text-amber-800">{liveGraph.warnings.join(" ")}</p> : null}
             {detailNode?.rhymeData ? (
               <div className="space-y-3 rounded-lg border border-neutral-200 bg-white/55 p-3">
                 <div className="grid grid-cols-2 gap-3 text-xs">
@@ -1968,9 +1543,9 @@ export default function Home() {
 
             <p className="mt-3 text-xs text-neutral-500">
               {selectedNode
-                ? expandingNodeId === selectedNode.id
-                  ? "Expanding this rhyme branch..."
-                  : saveMessage || (relationType === "rhymes" ? "This node expands automatically when selected." : "Use Re-center to explore from this node.")
+                ? expandingNodeId === selectedNode.id || expandingMeaningNodes.has(selectedNode.id)
+                  ? "Expanding this branch..."
+                  : saveMessage || ((relationType === "rhymes" || relationType === "meaning") ? "This node expands automatically when selected." : "Use Re-center to explore from this node.")
                 : recenterMessage
                   ? "The new live word web is ready."
                 : "Select a graph node to enable actions."}

@@ -155,6 +155,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const word = searchParams.get("word")?.trim().replace(/\s+/g, " ");
   const relationType = searchParams.get("relationType") as RelationType | null;
+  if (relationType === "meaning") return NextResponse.json({ error: "Use POST /api/meaning for semantic searches." }, { status: 400 });
 
   if (!word) {
     return NextResponse.json(

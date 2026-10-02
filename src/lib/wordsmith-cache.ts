@@ -1,3 +1,5 @@
+import type { MeaningNodeData, InputAnalysis } from "./meaning/types";
+
 export type RelationType =
   | "meaning"
   | "rhymes"
@@ -6,6 +8,8 @@ export type RelationType =
   | "tone-theme";
 
 export type WordNode = {
+  meaningData?: MeaningNodeData;
+  meaningAnalysis?: InputAnalysis;
   id: string;
   label: string;
   relationType: RelationType;
