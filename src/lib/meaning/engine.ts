@@ -91,5 +91,9 @@ export async function meaningHealth() {
   const checks = await Promise.allSettled([lexical.findSenses("word"), embedCached(provider, ["health check"])]);
   const lexicalProviderReady = checks[0].status === "fulfilled", embeddingProviderReady = checks[1].status === "fulfilled";
   const vectorIndexReady = !!library.index && library.index.model === provider.name && library.index.dimensions === provider.dimensions();
-  return { ok: lexicalProviderReady && embeddingProviderReady && vectorIndexReady, lexicalProviderReady, embeddingProviderReady, embeddingProvider: provider.name, phraseCount: library.entries.length, wordCount: words.entries.length, conceptCount: curated.length, vectorIndexReady, wordIndexReady: words.index?.model === provider.name, dimensions: library.index?.dimensions ?? 0 };
+  const failedEmbedding = checks[1].status === "rejected" ? checks[1].reason : undefined;
+  // Local model errors contain package/file names, never credentials. Keep just the
+  // first line, redact runtime paths, and never expose a stack or remote API error.
+  const embeddingInitializationError = failedEmbedding ? provider.name.startsWith("local:") && failedEmbedding instanceof Error ? failedEmbedding.message.split("\n")[0].replace(/\/(?:var|tmp|home)\/[^\s'";]+/g, "[runtime file]").slice(0, 250) : "Embedding provider unavailable." : undefined;
+  return { ok: lexicalProviderReady && embeddingProviderReady && vectorIndexReady, lexicalProviderReady, embeddingProviderReady, embeddingProvider: provider.name, phraseCount: library.entries.length, wordCount: words.entries.length, conceptCount: curated.length, vectorIndexReady, wordIndexReady: words.index?.model === provider.name, dimensions: library.index?.dimensions ?? 0, embeddingInitializationError };
 }
