@@ -21,7 +21,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       return pipeline("feature-extraction", local ? bundled : "Xenova/all-MiniLM-L6-v2", { dtype: "q8", device: "cpu", local_files_only: deploymentRuntime });
     })();
     let extractor: FeatureExtractionPipeline;
-    try { extractor = await loading; } catch (error) { globalThis.__meaningLocalPipeline = undefined; throw error; }
+    try { extractor = await loading; } catch (error) { globalThis.__meaningLocalPipeline = undefined; console.error("Meaning sentence model initialization failed:", error); throw error; }
     const result: number[][] = [];
     for (let i = 0; i < texts.length; i += 32) {
       const output = await extractor(texts.slice(i, i + 32), { pooling: "mean", normalize: true });
