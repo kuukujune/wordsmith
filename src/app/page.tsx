@@ -57,7 +57,7 @@ const desktopGraphRows = "minmax(0, 1fr) 42px 58px";
 const compactGraphRows = "minmax(0, 1fr) 34px 52px";
 
 const meaningModeOptions: Array<{ value: MeaningMode; label: string }> = [
-  { value: "auto", label: "All" }, { value: "synonym", label: "Synonyms" }, { value: "related", label: "Related" }, { value: "broader", label: "Broader" }, { value: "narrower", label: "More specific" }, { value: "contrast", label: "Contrasts" }, { value: "imagery", label: "Imagery" }, { value: "rephrasing", label: "Rephrasings" },
+  { value: "auto", label: "All" }, { value: "synonym", label: "Synonyms" }, { value: "related", label: "Related" }, { value: "contrast", label: "Contrasts" }, { value: "imagery", label: "Imagery" }, { value: "rephrasing", label: "Rephrasings" },
 ];
 
 const rhymeModeOptions: Array<{ value: RhymeMode; label: string }> = [
@@ -557,6 +557,7 @@ export default function Home() {
         setSearchTerm(graph.center);
         setRelationType(graph.relationType);
         setLiveGraph(graph);
+        setViewMode("web");
         meaningExpansionKeys.current.clear();
         if (graph.meaningMode) setMeaningMode(graph.meaningMode);
         setExpandedRhymeKeys(new Set());
@@ -868,7 +869,7 @@ export default function Home() {
             fit: true,
             padding: 12,
           },
-          minZoom: 0.35,
+          minZoom: 0.05,
           maxZoom: 3,
           userPanningEnabled: true,
           userZoomingEnabled: true,
@@ -928,6 +929,27 @@ export default function Home() {
     };
   }, [graphElements]);
 
+  // The panel changes size after responsive layout and result controls render.
+  // Observe its actual dimensions rather than fitting only on window resize.
+  useEffect(() => {
+    const container = graphContainerRef.current;
+    if (!container || viewMode !== "web") return;
+    let frame = 0;
+    const fitGraph = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const cy = cyRef.current;
+        if (!cy || container.clientWidth === 0 || container.clientHeight === 0) return;
+        cy.resize();
+        cy.fit(undefined, 24);
+      });
+    };
+    const observer = new ResizeObserver(fitGraph);
+    observer.observe(container);
+    fitGraph();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [viewMode, graphElements]);
+
   useEffect(() => {
     const cy = cyRef.current;
 
@@ -970,7 +992,9 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void performSearch(searchTerm, relationType);
+    // A new query starts with all relationships. A filter from the previous
+    // query (for example rephrasings for a single word) can have no matches.
+    void performSearch(searchTerm, relationType, { meaningModeOverride: "auto" });
   }
 
   function chooseRelationType(type: RelationType) {
@@ -1289,7 +1313,7 @@ export default function Home() {
               ref={graphContainerRef}
               data-wordsmith-graph
               aria-hidden={viewMode !== "web"}
-              className={`absolute inset-0 h-full min-h-[280px] w-full ${viewMode === "web" ? "" : "invisible"}`}
+              className={`absolute inset-0 h-full w-full ${viewMode === "web" ? "" : "invisible"}`}
             />
 
             {viewMode === "list" ? (

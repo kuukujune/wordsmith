@@ -39,6 +39,9 @@ describe("real MiniLM and WordNet integration", () => {
     expect(response.center.analysis.selectedSense?.id).toBe(sense.id);
     expect(response.results.length).toBeGreaterThan(0);
     expect(response.results.every(result => result.relationship === "broader-concept")).toBe(true);
+    const related = await searchMeaning({ query: "bank", senseId: sense.id, mode: "related" });
+    expect(related.results.some(result => result.relationship === "broader-concept")).toBe(true);
+    expect(related.results.every(result => ["related-concept", "near-synonym", "broader-concept"].includes(result.relationship))).toBe(true);
     const contrasts = await searchMeaning({ query: "hope", mode: "contrast" });
     expect(contrasts.results.some(result => result.text === "despair")).toBe(true);
     const synonyms = await searchMeaning({ query: "hope", mode: "synonym" });
