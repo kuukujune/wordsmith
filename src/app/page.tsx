@@ -57,7 +57,7 @@ const desktopGraphRows = "minmax(0, 1fr) 42px 58px";
 const compactGraphRows = "minmax(0, 1fr) 34px 52px";
 
 const meaningModeOptions: Array<{ value: MeaningMode; label: string }> = [
-  { value: "auto", label: "All" }, { value: "synonym", label: "Synonyms" }, { value: "related", label: "Related" }, { value: "contrast", label: "Contrasts" }, { value: "imagery", label: "Imagery" }, { value: "rephrasing", label: "Rephrasings" },
+  { value: "auto", label: "Close meanings" }, { value: "synonym", label: "Synonyms" }, { value: "related", label: "Related" }, { value: "antonym", label: "Antonyms" }, { value: "imagery", label: "Imagery" }, { value: "rephrasing", label: "Rephrasings" },
 ];
 
 const rhymeModeOptions: Array<{ value: RhymeMode; label: string }> = [
@@ -355,8 +355,8 @@ const graphStylesheet = [
       "curve-style": "straight",
     },
   },
-  { selector: ".meaning-synonym, .meaning-near-synonym, .meaning-related-concept, .meaning-broader-concept, .meaning-narrower-concept, .meaning-contrast, .meaning-symbolic-association, .meaning-imagery-association, .meaning-rephrasing", style: { label: "data(semanticLabel)", "font-size": 8, "text-background-color": "#faf9f6", "text-background-opacity": .9, "text-rotation": "autorotate" } },
-  { selector: ".meaning-near-synonym, .meaning-contrast", style: { "line-style": "dashed" } },
+  { selector: ".meaning-synonym, .meaning-near-synonym, .meaning-related-concept, .meaning-broader-concept, .meaning-narrower-concept, .meaning-antonym, .meaning-symbolic-association, .meaning-imagery-association, .meaning-rephrasing", style: { label: "data(semanticLabel)", "font-size": 8, "text-background-color": "#faf9f6", "text-background-opacity": .9, "text-rotation": "autorotate" } },
+  { selector: ".meaning-near-synonym, .meaning-antonym", style: { "line-style": "dashed" } },
   { selector: ".meaning-symbolic-association, .meaning-imagery-association", style: { "line-style": "dotted" } },
   { selector: ".meaning-broader-concept", style: { width: 2.5 } },
   { selector: ".rhyme-near", style: { "line-style": "dashed" } },
@@ -532,7 +532,7 @@ export default function Home() {
       try {
         const activeRhymeMode = options.rhymeModeOverride ?? rhymeMode;
         const response = type === "meaning"
-          ? await fetch("/api/meaning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: cleanedTerm, mode: options.meaningModeOverride ?? meaningMode, senseId: options.senseId, limit: 16 }), signal: controller.signal })
+          ? await fetch("/api/meaning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: cleanedTerm, mode: options.meaningModeOverride ?? meaningMode, senseId: options.senseId, limit: relatedNodeLimit }), signal: controller.signal })
           : type === "rhymes"
           ? await fetch("/api/rhyme", {
               method: "POST",
@@ -601,7 +601,7 @@ export default function Home() {
     setExpandingNodeId(parent.id);
     const originalGraph = liveGraph;
     try {
-      const response = await fetch("/api/meaning", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ query: parent.label, mode: meaningMode, limit: 8, originalCenter: originalGraph.center, exclude: [originalGraph.center, ...originalGraph.nodes.map(n => n.label)] }) });
+      const response = await fetch("/api/meaning", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ query: parent.label, mode: meaningMode, limit: 8, originalCenter: originalGraph.center, originalSenseId: originalGraph.selectedSenseId, context: parent.definition, exclude: [originalGraph.center, ...originalGraph.nodes.map(n => n.label)] }) });
       const payload = await response.json() as MeaningSearchResponse & { error?: string };
       if (!response.ok || payload.error) throw new Error(payload.error ?? "Expansion failed.");
       if (controller.signal.aborted) return;
@@ -1513,7 +1513,7 @@ export default function Home() {
               {detailNode?.pronunciation ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Pronunciation</p><p className="truncate text-neutral-700">{detailNode.pronunciation}</p></div> : null}
               {detailNode?.syllableCount ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Syllables</p><p className="text-neutral-700">{detailNode.syllableCount}</p></div> : null}
             </div>
-            {detailNode?.meaningAnalysis && detailNode.meaningAnalysis.possibleSenses.length > 1 ? <div className="space-y-2"><p className="text-xs font-semibold">Meaning / sense</p>{detailNode.meaningAnalysis.possibleSenses.map(sense => <button type="button" key={sense.id} aria-pressed={liveGraph?.selectedSenseId === sense.id} className={`block w-full rounded border p-2 text-left text-xs ${liveGraph?.selectedSenseId === sense.id ? "border-black bg-neutral-200" : "border-neutral-200"}`} onClick={() => void performSearch(centerPhrase, "meaning", { senseId: sense.id })}>{sense.definition}</button>)}</div> : null}
+            {detailNode?.meaningAnalysis && detailNode.meaningAnalysis.possibleSenses.length > 1 ? <div className="space-y-2"><p className="text-xs font-semibold">Meaning / sense</p><button type="button" aria-pressed={!liveGraph?.selectedSenseId} className="block w-full rounded border p-2 text-left text-xs" onClick={() => void performSearch(centerPhrase, "meaning")}>All senses</button>{detailNode.meaningAnalysis.possibleSenses.map(sense => <button type="button" key={sense.id} aria-pressed={liveGraph?.selectedSenseId === sense.id} className={`block w-full rounded border p-2 text-left text-xs ${liveGraph?.selectedSenseId === sense.id ? "border-black bg-neutral-200" : "border-neutral-200"}`} onClick={() => void performSearch(centerPhrase, "meaning", { senseId: sense.id })}>{sense.definition}</button>)}</div> : null}
             {detailNode?.meaningData ? <div className="space-y-2 rounded-lg border border-neutral-200 p-3 text-xs">
               <p className="font-semibold capitalize">{detailNode.meaningData.relationship.replaceAll("-", " ")} · {detailNode.strength}/100</p>
               <p>{detailNode.meaningData.explanation}</p>

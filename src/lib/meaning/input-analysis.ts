@@ -6,7 +6,7 @@ import type { EmbeddingProvider, InputAnalysis, LexicalProvider, MeaningSearchRe
 export async function analyzeInput(request: MeaningSearchRequest, lexical: LexicalProvider, embedding?: EmbeddingProvider): Promise<InputAnalysis> {
   const normalizedText = normalizeMeaningText(request.query), tokens = normalizedText.split(" "), kind = inputKind(normalizedText);
   const possibleSenses = kind === "word" ? await lexical.findSenses(normalizedText) : [];
-  let selectedSense: SemanticSense | undefined = possibleSenses[0];
+  let selectedSense: SemanticSense | undefined = !request.context && !request.senseId && ["auto", "synonym", "antonym"].includes(request.mode ?? "auto") ? undefined : possibleSenses[0];
   if (request.senseId) { selectedSense = possibleSenses.find(s => s.id === request.senseId); if (!selectedSense) throw new MeaningError("That sense does not belong to this word.", 400); }
   else if (request.context && embedding && possibleSenses.length > 1) {
     const vectors = await embedCached(embedding, [`${normalizedText}. ${request.context}`, ...possibleSenses.map(s => `${s.keywords?.join(", ")}. ${s.definition}. ${s.examples?.slice(0, 2).join(". ") ?? ""}`)]);

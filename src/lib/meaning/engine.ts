@@ -8,6 +8,7 @@ import { retrieveCandidates } from "./candidate-provider";
 import { classifyMeaning, modeRelationships } from "./classification";
 import { scoreMeaning, calibratedSimilarity } from "./semantic-scoring";
 import { diversityRank } from "./diversity-ranking";
+import { wordWeb } from "./word-web";
 import { MeaningError, normalizeMeaningText, validateMeaningRequest } from "./normalize";
 import concepts from "../../data/meaning/concepts.json";
 import curated from "../../data/meaning/curated.json";
@@ -29,6 +30,33 @@ export async function searchMeaning(value: MeaningSearchRequest, dependencies: E
   let analysis;
   try { analysis = await analyzeInput(request, lexical, embedding); }
   catch (error) { if (error instanceof MeaningError) throw error; throw new MeaningError("Lexical data is unavailable. Reinstall dependencies.", 503); }
+  if (analysis.inputKind === "word" && ["auto", "synonym"].includes(request.mode)) {
+    const web = await wordWeb(analysis, request, lexical, embedding);
+    if (request.originalCenter) {
+      const rootRequest = { query: request.originalCenter, senseId: request.originalSenseId, mode: request.mode, limit: 49, minimumScore: request.minimumScore };
+      const rootAnalysis = await analyzeInput(rootRequest, lexical, embedding);
+      const rootWeb = await wordWeb(rootAnalysis, rootRequest, lexical, embedding);
+      const rootResults = new Map(rootWeb.results.map(result => [result.normalizedText, result]));
+      const supported: MeaningResult[] = [];
+      for (const result of web.results) {
+        const rootResult = rootResults.get(result.normalizedText);
+        if (!rootResult || !result.definition || !rootResult.definition) continue;
+        if (result.definition !== rootResult.definition) {
+          if (!embedding) continue;
+          try {
+            const [parentSense, rootSense] = await embedCached(embedding, [result.definition, rootResult.definition]);
+            if (cosine(parentSense, rootSense) < .58) continue;
+          } catch { continue; }
+        }
+        supported.push({ ...result, centerSimilarity: rootResult.score });
+      }
+      web.results = supported;
+      web.warnings.push(...rootWeb.warnings);
+    }
+    const response: MeaningSearchResponse = { center: { text: request.query, inputKind: analysis.inputKind, analysis }, mode: request.mode, results: web.results, diagnostics: { candidateCount: web.candidateCount, scoredCount: web.results.length, returnedCount: web.results.length, cacheHit: false, durationMs: performance.now() - started, embeddingProvider: embedding?.name ?? "unavailable", warnings: [...warnings, ...web.warnings] } };
+    if (!warnings.length && !web.warnings.some(w => /unavailable/i.test(w)) && !dependencies.lexical && !dependencies.embedding) cache.set(key, response);
+    return response;
+  }
   if (analysis.inputKind === "phrase" && (!embedding || !queryVector)) throw new MeaningError("Phrase meaning requires sentence embeddings. Prepare the local model or configure EMBEDDING_API_URL and EMBEDDING_MODEL.", 503);
   const indexReady = !!library.index && library.index.model === embedding?.name && library.index.dimensions === embedding?.dimensions();
   if (!indexReady) {

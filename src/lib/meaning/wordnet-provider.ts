@@ -58,16 +58,16 @@ export class WordnetProvider implements LexicalProvider {
   }
   async findRelations(word: string, options: Parameters<LexicalProvider["findRelations"]>[1]) {
     const senses = await this.findSenses(word);
-    const chosen = options.senseId ? senses.filter(s => s.id === options.senseId) : senses.slice(0, 3);
+    const chosen = options.senseId ? senses.filter(s => s.id === options.senseId) : senses;
     const candidates: LexicalCandidate[] = [];
     for (const sense of chosen) {
       for (const entry of usage.filter(entry => entry.query === word && sense.definition.toLowerCase().includes(entry.senseContains.toLowerCase()))) candidates.push({ text: entry.text, relationship: entry.relationship as MeaningRelationship, definition: entry.definition, explanation: entry.explanation, partOfSpeech: sense.partOfSpeech, senseId: sense.id, confidence: 1, quality: .98, sources: ["phrase-library"] });
       const synset = await readSynset(sense.id);
       if (options.relations.includes("synonym")) for (const text of synset.words) if (text !== word) candidates.push({ text, relationship: "synonym", definition: synset.definition, example: synset.examples[0], partOfSpeech: sense.partOfSpeech, senseId: sense.id, confidence: 1, sources: ["wordnet"] });
-      const symbols: Record<string, MeaningRelationship> = { "@": "broader-concept", "@i": "broader-concept", "~": "narrower-concept", "~i": "narrower-concept", "!": "contrast", "+": "related-concept", "&": "near-synonym", "^": "related-concept" };
+      const symbols: Record<string, MeaningRelationship> = { "@": "broader-concept", "@i": "broader-concept", "~": "narrower-concept", "~i": "narrower-concept", "!": "antonym", "+": "related-concept", "&": "near-synonym", "^": "related-concept" };
       for (const pointer of synset.pointers) {
         const relationship = symbols[pointer.symbol]; if (!relationship) continue;
-        const mode = relationship === "broader-concept" ? "broader" : relationship === "narrower-concept" ? "narrower" : relationship === "contrast" ? "contrast" : "related";
+        const mode = relationship === "broader-concept" ? "broader" : relationship === "narrower-concept" ? "narrower" : relationship === "antonym" ? "antonym" : "related";
         if (!options.relations.includes(mode)) continue;
         if (pointer.source && synset.words[pointer.source - 1] !== word) continue;
         const target = await readSynset(`${pointer.pos}:${pointer.offset}`);

@@ -6,7 +6,7 @@ import { searchMeaning } from "../../src/lib/meaning/engine";
 import { createMeaningGraph, expandMeaningGraph } from "../../src/lib/meaning/graph-adapter";
 function request(body: unknown, key = `meaning-api-${Math.random()}`) { return new Request("http://localhost/api/meaning", { method: "POST", headers: { "Content-Type": "application/json", "x-real-ip": key }, body: JSON.stringify(body) }); }
 describe("meaning API and graph boundaries", () => {
-  it.each([ { query: "" }, { query: "!" }, { query: "x".repeat(201) }, { query: "hope", mode: "fake" }, { query: "hope", limit: 31 } ])("rejects malformed input", async body => { expect((await POST(request(body))).status).toBe(400); });
+  it.each([ { query: "" }, { query: "!" }, { query: "x".repeat(201) }, { query: "hope", mode: "fake" }, { query: "hope", limit: 50 } ])("rejects malformed input", async body => { expect((await POST(request(body))).status).toBe(400); });
   it("rejects malformed JSON", async () => { expect((await POST(new Request("http://localhost/api/meaning", { method: "POST", body: "[" }))).status).toBe(400); });
   it("returns genuine word and phrase response structures", async () => {
     for (const query of ["hope", "chasing the sunrise"]) {

@@ -12,12 +12,12 @@ import type { InputAnalysis, MeaningResult } from "../../src/lib/meaning/types";
 const analysis: InputAnalysis = { originalText: "freedom", normalizedText: "freedom", inputKind: "word", wordCount: 1, tokens: ["freedom"], possibleSenses: [], detectedPartOfSpeech: "noun" };
 describe("lexical evidence and independent scoring", () => {
   it.each([ ["freedom", "liberty", "synonym"], ["dog", "animal", "broader-concept"], ["animal", "dog", "narrower-concept"] ])("retains %s hierarchy evidence", async (word, target, relation) => {
-    const lexical = new WordnetProvider(), candidates = await lexical.findRelations(word, { relations: ["synonym", "broader", "narrower", "contrast", "related"], limit: 300 });
+    const lexical = new WordnetProvider(), candidates = await lexical.findRelations(word, { relations: ["synonym", "broader", "narrower", "antonym", "related"], limit: 300 });
     expect(candidates.some(c => c.text === target && c.relationship === relation)).toBe(true);
   });
   it("does not invent contrasts or synonyms from weak cosine similarity", () => {
     expect(classifyMeaning({ text: "refrigerator", sources: ["datamuse"] }, analysis, .1)).toBe("related-concept");
-    expect(classifyMeaning({ text: "confinement", relationship: "contrast", confidence: 1, sources: ["wordnet"] }, analysis, .3)).toBe("contrast");
+    expect(classifyMeaning({ text: "confinement", relationship: "antonym", confidence: 1, sources: ["wordnet"] }, analysis, .3)).toBe("antonym");
   });
   it("calibrates similarities and scores strong candidates above irrelevant controls", () => {
     expect(calibratedSimilarity(.15)).toBe(0); expect(calibratedSimilarity(.85)).toBe(100);

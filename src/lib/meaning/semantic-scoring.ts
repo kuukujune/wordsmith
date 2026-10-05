@@ -26,7 +26,7 @@ export function scoreMeaning(analysis: InputAnalysis, candidate: LexicalCandidat
   // Structured relation evidence remains authoritative in degraded lexical mode,
   // and antonyms are not rejected merely because embeddings encode their opposition.
   if (candidate.relationship && lexicalRelationship >= 80) {
-    const evidenceBase = candidate.relationship === "synonym" ? 88 : candidate.relationship === "near-synonym" ? 83 : candidate.relationship === "contrast" ? 77 : candidate.relationship.includes("concept") ? 73 : 70;
+    const evidenceBase = candidate.relationship === "synonym" ? 88 : candidate.relationship === "near-synonym" ? 83 : candidate.relationship === "antonym" ? 77 : candidate.relationship.includes("concept") ? 73 : 70;
     total = Math.max(total, evidenceBase + embeddingSimilarity * .08);
   }
   if (mode === "imagery") total = Math.max(total, embeddingSimilarity * .55 + imagerySimilarity * .2 + toneSimilarity * .1 + quality * .1 + grammaticalCompatibility * .05);

@@ -34,9 +34,9 @@ export async function retrieveCandidates(analysis: InputAnalysis, request: Meani
       for (const text of group.symbols) symbolic.push({ text, relationship: group.concept === "hope" ? "imagery-association" : "symbolic-association", confidence: .9, explanation: `The image suggests ${group.concept}: ${group.definition}`, sources: ["phrase-library"], conceptTags: [concept], toneTags: [group.tone], imageryTags: [group.imagery], quality: .95 });
     }
   }
-  if (contrastMap[concept]) symbolic.push({ text: contrastMap[concept], relationship: "contrast", confidence: .98, sources: ["phrase-library"], explanation: `${contrastMap[concept]} opposes ${concept}: their central ideas are in conflict.` });
+  if (contrastMap[concept]) symbolic.push({ text: contrastMap[concept], relationship: "antonym", confidence: .98, sources: ["phrase-library"], explanation: `${contrastMap[concept]} opposes ${concept}: their central ideas are in conflict.` });
   if (analysis.inputKind === "word") {
-    tasks.push({ name: "WordNet", run: lexical.findRelations(analysis.normalizedText, { senseId: analysis.selectedSense?.id, relations: ["synonym", "broader", "narrower", "contrast", "related"], limit: 300 }) });
+    tasks.push({ name: "WordNet", run: lexical.findRelations(analysis.normalizedText, { senseId: analysis.selectedSense?.id, relations: ["synonym", "broader", "narrower", "antonym", "related"], limit: 300 }) });
     // Sense context reduces collisions such as financial bank vs river bank.
     tasks.push({ name: "Datamuse", run: datamuseCandidates(`${analysis.normalizedText}${analysis.selectedSense ? ` ${analysis.selectedSense.keywords?.join(" ")}` : ""}`) });
   }

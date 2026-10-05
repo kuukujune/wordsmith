@@ -8,9 +8,9 @@ export function inputKind(text: string): SemanticInputKind { return normalizeMea
 export class MeaningError extends Error { constructor(message: string, public status: number) { super(message); } }
 const schema = z.object({
   query: z.string().min(1).max(200).refine(v => { const n = normalizeMeaningText(v); return !!n && n.split(" ").length <= 25; }, "Enter up to 25 words, including letters or numbers."),
-  mode: z.enum(["auto", "synonym", "related", "broader", "narrower", "contrast", "imagery", "rephrasing"]).default("auto"),
-  limit: z.number().int().min(1).max(30).default(16), minimumScore: z.number().min(0).max(100).default(55),
-  exclude: z.array(z.string().max(200)).max(100).default([]), context: z.string().max(1000).default(""), senseId: z.string().max(100).optional(), originalCenter: z.string().max(200).optional(),
+  mode: z.preprocess(value => value === "contrast" ? "antonym" : value, z.enum(["auto", "synonym", "related", "broader", "narrower", "antonym", "imagery", "rephrasing"]).default("auto")),
+  limit: z.number().int().min(1).max(49).default(49), minimumScore: z.number().min(0).max(100).default(55),
+  exclude: z.array(z.string().max(200)).max(100).default([]), context: z.string().max(1000).default(""), senseId: z.string().max(100).optional(), originalCenter: z.string().max(200).optional(), originalSenseId: z.string().max(100).optional(),
 });
 export function validateMeaningRequest(value: unknown) {
   const parsed = schema.safeParse(value);

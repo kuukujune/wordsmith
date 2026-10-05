@@ -16,6 +16,6 @@ export function classifyMeaning(candidate: LexicalCandidate, analysis: InputAnal
   return "related-concept";
 }
 export const modeRelationships: Record<MeaningMode, MeaningRelationship[]> = {
-  auto: ["synonym", "near-synonym", "related-concept", "broader-concept", "narrower-concept", "contrast", "symbolic-association", "imagery-association", "rephrasing"],
-  synonym: ["synonym", "near-synonym", "rephrasing"], related: ["related-concept", "near-synonym", "broader-concept"], broader: ["broader-concept"], narrower: ["narrower-concept"], contrast: ["contrast"], imagery: ["imagery-association", "symbolic-association"], rephrasing: ["rephrasing"],
+  auto: ["synonym", "near-synonym", "related-concept", "broader-concept", "narrower-concept", "symbolic-association", "imagery-association", "rephrasing"],
+  synonym: ["synonym", "near-synonym", "rephrasing"], related: ["related-concept", "near-synonym", "broader-concept"], broader: ["broader-concept"], narrower: ["narrower-concept"], antonym: ["antonym"], imagery: ["imagery-association", "symbolic-association"], rephrasing: ["rephrasing"],
 };
