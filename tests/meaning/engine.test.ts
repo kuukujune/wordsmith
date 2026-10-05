@@ -8,6 +8,17 @@ import { WordnetProvider } from "../../src/lib/meaning/wordnet-provider";
 
 beforeAll(async () => { await embedCached(embeddingProvider(), ["initialize sentence embeddings"]); }, 120_000);
 describe("real MiniLM and WordNet integration", () => {
+  it.each(["absolute", "the cat sat on the mat", "putting on my shoes", "quantum mechanics"])("builds a usable web for sparse input %s", async query => {
+    const response = await searchMeaning({ query });
+    expect(response.results.length).toBeGreaterThanOrEqual(6);
+    expect(new Set(response.results.map(result => result.normalizedText)).size).toBe(response.results.length);
+    for (const result of response.results.filter(result => result.score < 55)) {
+      expect(result.explanation).toMatch(/Exploratory association/);
+      expect(result.scoreBreakdown.embeddingSimilarity).toBeGreaterThan(0);
+    }
+    const strict = await searchMeaning({ query, minimumScore: 55 });
+    expect(strict.results.every(result => result.score >= 55)).toBe(true);
+  }, 30_000);
   it("loads a real model and prepared index", async () => {
     const health = await meaningHealth(); expect(health.ok).toBe(true); expect(health.phraseCount).toBeGreaterThanOrEqual(3000); expect(health.wordCount).toBe(2500); expect(health.wordIndexReady).toBe(true); expect(health.dimensions).toBe(384);
   });

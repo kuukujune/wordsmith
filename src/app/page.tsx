@@ -38,8 +38,8 @@ const relationOptions = [
   },
 ] as const;
 
-const primaryRelationOptions = relationOptions.slice(0, 3);
-const moreRelationOptions = relationOptions.slice(3);
+const primaryRelationOptions = relationOptions.slice(0, 2);
+const moreRelationOptions = relationOptions.slice(2);
 
 const savedWordsStorageKey = "wordsmith.savedWords";
 const savedWebsStorageKey = "wordsmith.savedWebs";

@@ -19,7 +19,8 @@ export async function searchMeaning(value: MeaningSearchRequest, dependencies: E
   const request = validateMeaningRequest(value), started = performance.now(), lexical = dependencies.lexical ?? new WordnetProvider();
   let embedding: EmbeddingProvider | undefined = dependencies.embedding ?? embeddingProvider();
   const library = await loadPhraseLibrary(), wordLibrary = await loadWordLibrary(), warnings: string[] = [];
-  const key = JSON.stringify({ ...request, query: normalizeMeaningText(request.query), context: normalizeMeaningText(request.context), exclude: request.exclude.map(normalizeMeaningText).sort(), version: meaningDataVersion, hash: library.index?.dataHash, wordHash: wordLibrary.index?.dataHash, model: embedding.name });
+  const allowExploration = request.mode === "auto" && !request.originalCenter && value.minimumScore === undefined;
+  const key = JSON.stringify({ ...request, allowExploration, query: normalizeMeaningText(request.query), context: normalizeMeaningText(request.context), exclude: request.exclude.map(normalizeMeaningText).sort(), version: meaningDataVersion, hash: library.index?.dataHash, wordHash: wordLibrary.index?.dataHash, model: embedding.name });
   const cache = cacheFor<MeaningSearchResponse>("meaning-search");
   if (!dependencies.lexical && !dependencies.embedding) { const cached = cache.get(key); if (cached) return { ...cached, center: { ...cached.center, text: request.query, analysis: { ...cached.center.analysis, originalText: request.query } }, diagnostics: { ...cached.diagnostics, cacheHit: true, durationMs: performance.now() - started } }; }
   let queryVector: number[] | undefined;
@@ -58,16 +59,20 @@ export async function searchMeaning(value: MeaningSearchRequest, dependencies: E
   let centerVector: number[] | undefined;
   if (request.originalCenter && embedding) { try { [centerVector] = await embedCached(embedding, [normalizeMeaningText(request.originalCenter)]); } catch { throw new MeaningError("Cannot verify relevance to the original centre. Retry this expansion.", 503); } }
   const results: MeaningResult[] = [];
+  const exploratory: MeaningResult[] = [];
+  // Explicit score limits and branch relevance remain strict. Initial All
+  // searches may show measured nearest neighbors when the corpus is sparse.
   for (const candidate of candidates) {
     const vector = vectors.get(candidate.text), similarity = queryVector && vector ? cosine(queryVector, vector) : undefined;
     if (similarity === undefined && !candidate.relationship) continue;
     // Generated or retrieved neighbors need actual semantic evidence; curated symbolic
     // and WordNet relationships may express opposites with lower cosine similarity.
-    if (!candidate.relationship && (similarity ?? 0) < .36) continue;
+    if (!candidate.relationship && (similarity ?? 0) < (allowExploration && !candidate.sources.includes("generated") ? .2 : .36)) continue;
     const relationship = classifyMeaning(candidate, analysis, similarity ?? 0);
     if (!modeRelationships[request.mode].includes(relationship)) continue;
     const scoreBreakdown = scoreMeaning(analysis, candidate, similarity, contextualVector && vector ? cosine(contextualVector, vector) : similarity, { tone: tags ? [tags.tone] : [], imagery: tags ? [tags.imagery] : [], concepts: tags ? [tags.concept] : [] }, request.mode);
-    if (scoreBreakdown.total < Math.max(request.minimumScore, candidate.sources.includes("generated") ? 60 : 40)) continue;
+    const belowCutoff = scoreBreakdown.total < Math.max(request.minimumScore, candidate.sources.includes("generated") ? 60 : 40);
+    if (belowCutoff && (!allowExploration || candidate.sources.includes("generated"))) continue;
     let score = scoreBreakdown.total, centerSimilarity: number | undefined;
     if (request.originalCenter) {
       if (!centerVector || !vector) continue;
@@ -77,7 +82,12 @@ export async function searchMeaning(value: MeaningSearchRequest, dependencies: E
       if (score < request.minimumScore) continue;
     }
     const evidence = candidate.sources.includes("wordnet") ? `WordNet identifies a ${relationship.replaceAll("-", " ")} in the sense “${analysis.selectedSense?.definition ?? candidate.definition}”.` : `Sentence embeddings connect “${candidate.text}” with “${analysis.normalizedText}”${candidate.conceptTags?.length ? ` through ${candidate.conceptTags.join(", ")}` : ""}.`;
-    results.push({ id: `meaning-${encodeURIComponent(candidate.text)}`, text: candidate.text, normalizedText: candidate.text, inputKind: candidate.text.includes(" ") ? "phrase" : "word", relationship, score, strength: score, scoreBreakdown, definition: candidate.definition, explanation: candidate.explanation ?? evidence, example: candidate.example, tone: candidate.toneTags?.join(", ") || undefined, partOfSpeech: candidate.partOfSpeech, source: candidate.sources.length > 1 ? "combined" : candidate.sources[0], sourceDetails: candidate.sources, possibleSenseId: candidate.senseId, parentText: request.originalCenter ? analysis.originalText : undefined, parentSimilarity: request.originalCenter ? scoreBreakdown.total : undefined, centerSimilarity });
+    (belowCutoff ? exploratory : results).push({ id: `meaning-${encodeURIComponent(candidate.text)}`, text: candidate.text, normalizedText: candidate.text, inputKind: candidate.text.includes(" ") ? "phrase" : "word", relationship, score, strength: score, scoreBreakdown, definition: candidate.definition, explanation: belowCutoff ? `Exploratory association: a nearby idea in the available library, with lower semantic confidence. ${evidence}` : candidate.explanation ?? evidence, example: candidate.example, tone: candidate.toneTags?.join(", ") || undefined, partOfSpeech: candidate.partOfSpeech, source: candidate.sources.length > 1 ? "combined" : candidate.sources[0], sourceDetails: candidate.sources, possibleSenseId: candidate.senseId, parentText: request.originalCenter ? analysis.originalText : undefined, parentSimilarity: request.originalCenter ? scoreBreakdown.total : undefined, centerSimilarity });
+  }
+  if (allowExploration && results.length < Math.min(6, request.limit) && exploratory.length) {
+    const additional = diversityRank(exploratory, vectors, Math.min(6, request.limit) - results.length);
+    results.push(...additional);
+    warnings.push("Some nodes are exploratory associations because the library has few strong matches for this input.");
   }
   const ranked = diversityRank(results, vectors, request.limit);
   if (!candidates.length && analysis.inputKind === "word" && !analysis.possibleSenses.length && !embedding) throw new MeaningError("No semantic analysis is available for this input.", 422);

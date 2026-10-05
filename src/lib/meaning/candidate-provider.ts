@@ -39,13 +39,15 @@ export async function retrieveCandidates(analysis: InputAnalysis, request: Meani
     tasks.push({ name: "WordNet", run: lexical.findRelations(analysis.normalizedText, { senseId: analysis.selectedSense?.id, relations: ["synonym", "broader", "narrower", "contrast", "related"], limit: 300 }) });
     // Sense context reduces collisions such as financial bank vs river bank.
     tasks.push({ name: "Datamuse", run: datamuseCandidates(`${analysis.normalizedText}${analysis.selectedSense ? ` ${analysis.selectedSense.keywords?.join(" ")}` : ""}`) });
+  }
+    // Complete phrases can connect to words too (for example a sentence about
+    // a cat to feline), rather than only to the themed phrase collection.
     if (queryVector) tasks.push({ name: "word index", run: (async () => {
       const words = await loadWordLibrary();
       if (!words.index || words.index.model !== model) throw new Error("Word vector index unavailable.");
       const nearest = await new MatrixVectorIndex(words).search(queryVector, { limit: 200, minimumSimilarity: .2 });
       return nearest.map(item => { const entry = words.byId.get(item.id)!; return { text: entry.text, definition: entry.definition, partOfSpeech: entry.partOfSpeech, quality: entry.quality, vector: entryVector(words, item.id), similarity: item.similarity, sources: ["embedding-index"] } satisfies LexicalCandidate; });
     })() });
-  }
   if (queryVector && library.index?.model === model) {
     tasks.push({ name: "phrase index", run: (async () => {
       const nearest = await new MatrixVectorIndex(library).search(queryVector, { limit: 250, minimumSimilarity: .15 });
