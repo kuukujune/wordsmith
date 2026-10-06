@@ -58,8 +58,16 @@ const desktopGraphRows = "minmax(0, 1fr) 42px 58px";
 const compactGraphRows = "minmax(0, 1fr) 34px 52px";
 
 const meaningModeOptions: Array<{ value: MeaningMode; label: string }> = [
-  { value: "auto", label: "Close meanings" }, { value: "synonym", label: "Synonyms" }, { value: "related", label: "Related" }, { value: "antonym", label: "Antonyms" }, { value: "imagery", label: "Imagery" }, { value: "rephrasing", label: "Rephrasings" },
+  { value: "synonym", label: "Similar meaning" },
+  { value: "antonym", label: "Opposite meaning" },
+  { value: "related", label: "Related ideas" },
 ];
+
+function meaningCategory(mode?: MeaningMode): MeaningMode {
+  if (mode === "antonym") return "antonym";
+  if (mode === "related" || mode === "broader" || mode === "narrower" || mode === "imagery") return "related";
+  return "synonym";
+}
 
 const rhymeModeOptions: Array<{ value: RhymeMode; label: string }> = [
   { value: "auto", label: "All" },
@@ -273,7 +281,7 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState("");
   const [centerPhrase, setCenterPhrase] = useState("Wordsmith");
   const [relationType, setRelationType] = useState<RelationType>("meaning");
-  const [meaningMode, setMeaningMode] = useState<MeaningMode>("auto");
+  const [meaningMode, setMeaningMode] = useState<MeaningMode>("synonym");
   const meaningExpansionKeys = useRef(new Set<string>());
   const meaningExpansionControllers = useRef(new Map<string, AbortController>());
   const [expandingMeaningNodes, setExpandingMeaningNodes] = useState<Set<string>>(() => new Set());
@@ -423,7 +431,7 @@ export default function Home() {
         setLiveGraph(graph);
         setViewMode("web");
         meaningExpansionKeys.current.clear();
-        if (graph.meaningMode) setMeaningMode(graph.meaningMode);
+        if (graph.meaningMode) setMeaningMode(meaningCategory(graph.meaningMode));
         setExpandedRhymeKeys(new Set());
         setSelectedNode(null);
         setRecenterMessage("");
@@ -563,7 +571,7 @@ export default function Home() {
           edges: savedWeb.edges ?? buildEdgesFromNodes(savedWeb.nodes),
           source: savedWeb.source,
           rhymeMode: savedWeb.rhymeMode,
-          meaningMode: savedWeb.meaningMode,
+          meaningMode: meaningCategory(savedWeb.meaningMode),
           selectedSenseId: savedWeb.selectedSenseId,
         };
         queueMicrotask(() => {
@@ -572,7 +580,7 @@ export default function Home() {
           setRelationType(graph.relationType);
           setLiveGraph(graph);
           setRhymeMode(graph.rhymeMode ?? "auto");
-    setMeaningMode(graph.meaningMode ?? "auto");
+          setMeaningMode(meaningCategory(graph.meaningMode));
           setExplorationTrail([graph]);
           setTrailIndex(0);
           setRecenterMessage(`Reopened saved web “${savedWeb.title}”.`);
@@ -943,9 +951,9 @@ export default function Home() {
     setCenterPhrase(graph.center);
     setSearchTerm(graph.center);
     setRelationType(graph.relationType);
-    setLiveGraph(graph);
+    setLiveGraph(graph.relationType === "meaning" ? { ...graph, meaningMode: meaningCategory(graph.meaningMode) } : graph);
     setRhymeMode(graph.rhymeMode ?? "auto");
-    setMeaningMode(graph.meaningMode ?? "auto");
+    setMeaningMode(meaningCategory(graph.meaningMode));
     setSelectedNode(null);
     setSearchError("");
     window.history.pushState(
