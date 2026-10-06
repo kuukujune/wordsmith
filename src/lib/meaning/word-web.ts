@@ -2,6 +2,7 @@ import "server-only";
 import { loadThesaurus, reciprocal } from "./thesaurus-provider";
 import { embedCached, cosine } from "./embedding-provider";
 import { normalizeMeaningText } from "./normalize";
+import { branchResults } from "./branch-results";
 import { scoreMeaning } from "./semantic-scoring";
 import type { EmbeddingProvider, InputAnalysis, LexicalCandidate, LexicalProvider, MeaningResult, MeaningSearchRequest } from "./types";
 
@@ -68,23 +69,15 @@ export async function wordWeb(analysis: InputAnalysis, request: MeaningSearchReq
     unique.set(text, { id: `meaning-${encodeURIComponent(text)}`, text, normalizedText: text, inputKind: text.includes(" ") ? "phrase" : "word", relationship: candidate.relationship!, score: scoreBreakdown.total, strength: scoreBreakdown.total, scoreBreakdown, definition: candidate.definition, example: candidate.example, partOfSpeech: candidate.partOfSpeech, possibleSenseId: candidate.senseId, source: candidate.sources.length > 1 ? "combined" : candidate.sources[0], sourceDetails: candidate.sources, explanation: `Close to “${root}” in the sense “${sense?.definition ?? candidate.definition}”. ${candidate.sources.includes("thesaurus") ? "Reciprocal thesaurus entry with matching dictionary definitions." : "Explicit WordNet synonym or similar adjective."}`, parentText: request.originalCenter ? request.query : undefined, parentSimilarity: request.originalCenter ? scoreBreakdown.total : undefined, centerSimilarity: request.originalCenter ? scoreBreakdown.total : undefined });
   }
   const ranked = [...unique.values()].sort((a, b) => Number(b.sourceDetails?.length === 1) - Number(a.sourceDetails?.length === 1) || b.score - a.score || a.text.localeCompare(b.text)).slice(0, request.limit ?? 49);
-  // Parents are selected only from earlier results: a connected acyclic tree.
-  // Both words retain independent evidence to the same original root sense.
-  const children = new Map<string, number>();
-  if (!request.originalCenter) for (let i = 0; i < ranked.length; i++) {
-    const child = ranked[i];
-    const parent = ranked.slice(0, i).filter(p => !p.parentText && p.possibleSenseId === child.possibleSenseId && (children.get(p.text) ?? 0) < 5 && reciprocal(dictionary, p.text, child.text))
-      .map(p => ({ p, similarity: vectors.has(p.text) && vectors.has(child.text) ? cosine(vectors.get(p.text)!, vectors.get(child.text)!) : p.definition === child.definition ? 1 : 0 }))
-      .filter(p => p.similarity >= .58).sort((a, b) => b.similarity - a.similarity)[0];
-    if (parent) {
-      child.parentText = parent.p.text;
-      child.parentSimilarity = Math.round(parent.similarity * 100);
-      child.centerSimilarity = child.score;
-      child.explanation += ` Branch: “${root}” → “${parent.p.text}” → “${child.text}”; both words share this root sense and a reciprocal thesaurus link.`;
-      children.set(parent.p.text, (children.get(parent.p.text) ?? 0) + 1);
-    }
-  }
+  const branched = request.originalCenter ? ranked : branchResults(ranked, root, (a, b) => {
+    const linked = dictionary.get(a.text)?.has(b.text) || dictionary.get(b.text)?.has(a.text);
+    const similarity = vectors.has(a.text) && vectors.has(b.text) ? cosine(vectors.get(a.text)!, vectors.get(b.text)!) : a.definition === b.definition ? 1 : 0;
+    const sameSense = a.possibleSenseId === b.possibleSenseId;
+    const sharedDictionarySense = sameSense && a.sourceDetails?.length === 1 && b.sourceDetails?.length === 1 && a.sourceDetails[0] === "wordnet" && b.sourceDetails[0] === "wordnet";
+    if (sharedDictionarySense || (sameSense && linked)) return .9;
+    return (sameSense && similarity >= .55) || (linked && similarity >= .58) ? similarity : 0;
+  });
   if (ranked.length < (request.limit ?? 49)) warnings.push(`Found ${ranked.length} supported close meanings; unrelated words were not added to reach the ${Math.min(50, (request.limit ?? 49) + 1)}-node target.`);
-  return { results: ranked, warnings, candidateCount: entries.length + direct.length };
+  return { results: branched, warnings, candidateCount: entries.length + direct.length };
 }
 

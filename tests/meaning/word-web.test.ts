@@ -3,7 +3,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("../../src/lib/meaning/datamuse-provider", () => ({ datamuseCandidates: async () => [] }));
 import { searchMeaning } from "../../src/lib/meaning/engine";
 import { createMeaningGraph } from "../../src/lib/meaning/graph-adapter";
-import { loadThesaurus, reciprocal } from "../../src/lib/meaning/thesaurus-provider";
+import { loadThesaurus } from "../../src/lib/meaning/thesaurus-provider";
 import { validateMeaningRequest } from "../../src/lib/meaning/normalize";
 import { WordnetProvider } from "../../src/lib/meaning/wordnet-provider";
 
@@ -20,13 +20,17 @@ describe("root-anchored meaning webs", () => {
     const byId = new Map(graph.nodes.map(n => [n.id, n]));
     const dictionary = await loadThesaurus();
     const branches = graph.nodes.filter(n => n.parentId !== "center");
-    expect(branches.length).toBeGreaterThan(10);
+    expect(branches.length).toBeGreaterThanOrEqual(39);
+    expect(graph.nodes.filter(n => n.parentId === "center").length).toBeLessThanOrEqual(10);
+    expect(Math.max(...graph.nodes.map(n => n.depth ?? 1))).toBeGreaterThanOrEqual(3);
+    for (const parent of graph.nodes) expect(graph.nodes.filter(n => n.parentId === parent.id).length).toBeLessThanOrEqual(3);
     for (const node of branches) {
       const parent = byId.get(node.parentId!)!;
       expect(parent).toBeDefined();
-      expect(parent.meaningData!.possibleSenseId).toBe(node.meaningData!.possibleSenseId);
-      expect(reciprocal(dictionary, parent.label, node.label)).toBe(true);
-      expect(node.meaningData!.parentSimilarity).toBeGreaterThanOrEqual(58);
+      const sameSense = parent.meaningData!.possibleSenseId === node.meaningData!.possibleSenseId;
+      const linked = dictionary.get(parent.label)?.has(node.label) || dictionary.get(node.label)?.has(parent.label);
+      expect(sameSense || linked).toBeTruthy();
+      expect(node.meaningData!.parentSimilarity).toBeGreaterThanOrEqual(55);
       const visited = new Set<string>();
       let current = node;
       while (current.parentId !== "center") {

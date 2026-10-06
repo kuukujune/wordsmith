@@ -8,6 +8,7 @@ import { createRhymeGraph, expansionElements } from "@/lib/rhyme/graph-adapter";
 import type { WordNode, RelationType, WordSearchResponse, SavedWord, SavedWeb } from "@/lib/graph-types";
 import type { MeaningMode, MeaningSearchResponse } from "@/lib/meaning/types";
 import { createMeaningGraph, expandMeaningGraph } from "@/lib/meaning/graph-adapter";
+import { createUniformWebLayout } from "@/lib/web-layout";
 import { updateExplorationTrail } from "@/lib/search-logic";
 
 const relationOptions = [
@@ -99,143 +100,6 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function estimateLabelBox(
-  label: string,
-  options: {
-    fontSize?: number;
-    isCenter?: boolean;
-    maxWidth?: number;
-  } = {}
-) {
-  const isCenter = options.isCenter ?? false;
-  const fontSize = options.fontSize ?? (isCenter ? 54 : 24);
-  const maxWidth = options.maxWidth ?? (isCenter ? 420 : 250);
-  const averageCharacterWidth = fontSize * 0.54;
-  const lineHeight = fontSize * 1.25;
-  const estimatedWidth = Math.min(
-    maxWidth,
-    Math.max(isCenter ? 150 : 72, label.length * averageCharacterWidth)
-  );
-  const lineCount = Math.max(
-    1,
-    Math.ceil((label.length * averageCharacterWidth) / maxWidth)
-  );
-
-  return {
-    width: estimatedWidth + 20,
-    height: lineCount * lineHeight + 16,
-    radius: Math.max(estimatedWidth / 2, (lineCount * lineHeight) / 2) + 14,
-  };
-}
-
-function createSpiderWebLayout(centerPhrase: string, nodes: WordNode[]) {
-  const centerX = 520;
-  const centerY = 390;
-  const positions: Record<string, { x: number; y: number }> = {
-    center: {
-      x: centerX,
-      y: centerY,
-    },
-  };
-  const boxes = new Map<string, ReturnType<typeof estimateLabelBox>>();
-  const centerBox = estimateLabelBox(centerPhrase, { isCenter: true });
-  boxes.set("center", centerBox);
-
-  nodes.forEach((node) => {
-    boxes.set(node.id, estimateLabelBox(node.label));
-  });
-
-  const firstRingNodes = nodes
-    .filter((node) => (node.parentId ?? "center") === "center")
-    .sort((first, second) => second.strength - first.strength)
-    .slice(0, 30);
-  const maxFirstRingLabelRadius = Math.max(
-    70,
-    ...firstRingNodes.map((node) => boxes.get(node.id)?.radius ?? 70)
-  );
-  const firstRingRadius = Math.max(
-    210,
-    centerBox.radius + maxFirstRingLabelRadius + 78
-  );
-
-  firstRingNodes.forEach((node, index) => {
-    const angle = (2 * Math.PI * index) / Math.max(firstRingNodes.length, 1) - Math.PI / 2;
-
-    positions[node.id] = {
-      x: centerX + Math.cos(angle) * (firstRingRadius + (node.meaningData ? Math.max(0, 100 - node.strength) * 2 : 0)),
-      y: centerY + Math.sin(angle) * (firstRingRadius + (node.meaningData ? Math.max(0, 100 - node.strength) * 2 : 0)),
-    };
-
-    const childNodes = nodes
-      .filter((childNode) => childNode.parentId === node.id)
-      .sort((first, second) => second.strength - first.strength);
-    const childSpread = Math.min(1.12, 0.34 + childNodes.length * 0.12);
-
-    childNodes.forEach((childNode, childIndex) => {
-      const childBox = boxes.get(childNode.id) ?? estimateLabelBox(childNode.label);
-      const offset =
-        childNodes.length === 1
-          ? 0
-          : (childIndex / (childNodes.length - 1) - 0.5) * childSpread;
-      const childAngle = angle + offset;
-      const childRadius =
-        firstRingRadius +
-        118 +
-        (childIndex % 3) * 44 +
-        Math.min(64, childBox.width * 0.16);
-
-      positions[childNode.id] = {
-        x: centerX + Math.cos(childAngle) * childRadius,
-        y: centerY + Math.sin(childAngle) * childRadius,
-      };
-    });
-  });
-
-  for (const node of [...nodes].sort((a, b) => (a.depth ?? 1) - (b.depth ?? 1))) {
-    if (positions[node.id]) continue;
-    const parent = positions[node.parentId ?? "center"] ?? positions.center;
-    const angle = Math.atan2(parent.y - centerY, parent.x - centerX) + (nodes.indexOf(node) % 5 - 2) * .32;
-    positions[node.id] = { x: parent.x + Math.cos(angle) * 200, y: parent.y + Math.sin(angle) * 200 };
-  }
-  const movableNodes = nodes.filter((node) => positions[node.id]);
-
-  for (let iteration = 0; iteration < 110; iteration += 1) {
-    for (let firstIndex = 0; firstIndex < movableNodes.length; firstIndex += 1) {
-      for (
-        let secondIndex = firstIndex + 1;
-        secondIndex < movableNodes.length;
-        secondIndex += 1
-      ) {
-        const firstNode = movableNodes[firstIndex];
-        const secondNode = movableNodes[secondIndex];
-        const firstPosition = positions[firstNode.id];
-        const secondPosition = positions[secondNode.id];
-        const firstRadius = boxes.get(firstNode.id)?.radius ?? 70;
-        const secondRadius = boxes.get(secondNode.id)?.radius ?? 70;
-        const minimumDistance = firstRadius + secondRadius + 10;
-        const xDistance = secondPosition.x - firstPosition.x;
-        const yDistance = secondPosition.y - firstPosition.y;
-        const actualDistance = Math.hypot(xDistance, yDistance) || 1;
-
-        if (actualDistance >= minimumDistance) {
-          continue;
-        }
-
-        const pushDistance = (minimumDistance - actualDistance) / 2;
-        const xPush = (xDistance / actualDistance) * pushDistance;
-        const yPush = (yDistance / actualDistance) * pushDistance;
-
-        firstPosition.x -= xPush;
-        firstPosition.y -= yPush;
-        secondPosition.x += xPush;
-        secondPosition.y += yPush;
-      }
-    }
-  }
-
-  return positions;
-}
-
 function createReadableTextStyles(
   centerPhrase: string,
   nodes: WordNode[],
@@ -278,10 +142,10 @@ function createReadableTextStyles(
     });
 
     const depth = node.depth ?? 2;
-    const fontSize = depth === 0 ? 58 : depth === 1 ? 28 : 23;
+    const fontSize = depth === 0 ? 42 : 24;
     const preferredWidth = node.label.length * fontSize * 0.72;
-    const maximumWidth = depth === 0 ? 460 : depth === 1 ? 360 : 300;
-    const minimumWidth = depth === 0 ? 260 : depth === 1 ? 170 : 145;
+    const maximumWidth = depth === 0 ? 300 : 210;
+    const minimumWidth = depth === 0 ? 200 : 120;
     const openSpaceWidth = Number.isFinite(nearestDistance)
       ? nearestDistance * 0.78
       : maximumWidth;
@@ -591,7 +455,7 @@ export default function Home() {
   );
 
   const expandMeaningNode = useCallback(async (parent: WordNode) => {
-    if (relationType !== "meaning" || !liveGraph || isSearching || liveGraph.nodes.length >= relatedNodeLimit) return;
+    if (relationType !== "meaning" || meaningMode === "antonym" || !liveGraph || isSearching || liveGraph.nodes.length >= relatedNodeLimit) return;
     const key = `${parent.id}:${meaningMode}`;
     if (meaningExpansionKeys.current.has(key)) return;
     meaningExpansionKeys.current.add(key);
@@ -776,7 +640,7 @@ export default function Home() {
   }, []);
 
   const graphElements = useMemo(() => {
-    const layoutPositions = createSpiderWebLayout(centerPhrase, currentNodes);
+    const layoutPositions = createUniformWebLayout(currentNodes);
     const textStyles = createReadableTextStyles(
       centerPhrase,
       currentNodes,
@@ -828,7 +692,7 @@ export default function Home() {
 
     const edges = currentEdges.map((edge) => {
       const relationship = currentNodes.find((node) => node.id === edge.target)?.rhymeData?.relationship;
-      const meaningRelationship = currentNodes.find(node => node.id === edge.target)?.meaningData?.relationship;
+      const meaningRelationship = edge.relationship ?? currentNodes.find(node => node.id === edge.target)?.meaningData?.relationship;
       const classes = meaningRelationship ? `meaning-${meaningRelationship}` : relationship === "near-rhyme" ? "rhyme-near"
         : relationship === "multisyllabic-rhyme" ? "rhyme-multisyllabic"
         : relationship === "assonance" ? "rhyme-assonance"
@@ -867,7 +731,7 @@ export default function Home() {
           layout: {
             name: "preset",
             fit: true,
-            padding: 12,
+            padding: 40,
           },
           minZoom: 0.05,
           maxZoom: 3,
@@ -880,7 +744,7 @@ export default function Home() {
 
         const resizeGraph = () => {
           cy.resize();
-          cy.fit(undefined, 10);
+          cy.fit(undefined, 40);
         };
 
         window.requestAnimationFrame(resizeGraph);
@@ -917,9 +781,9 @@ export default function Home() {
       cy.layout({
         name: "preset",
         fit: true,
-        padding: 12,
+        padding: 40,
       }).run();
-      cy.fit(undefined, 10);
+      cy.fit(undefined, 40);
     }
 
     createOrUpdateGraph();
@@ -941,7 +805,7 @@ export default function Home() {
         const cy = cyRef.current;
         if (!cy || container.clientWidth === 0 || container.clientHeight === 0) return;
         cy.resize();
-        cy.fit(undefined, 24);
+        cy.fit(undefined, 40);
       });
     };
     const observer = new ResizeObserver(fitGraph);
@@ -992,9 +856,8 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    // A new query starts with all relationships. A filter from the previous
-    // query (for example rephrasings for a single word) can have no matches.
-    void performSearch(searchTerm, relationType, { meaningModeOverride: "auto" });
+    // Keep the active category when searching another word, including Antonyms.
+    void performSearch(searchTerm, relationType, { meaningModeOverride: meaningMode });
   }
 
   function chooseRelationType(type: RelationType) {
@@ -1054,7 +917,7 @@ export default function Home() {
       return;
     }
 
-    cy.fit(undefined, 10);
+    cy.fit(undefined, 40);
   }
 
   async function recenterSelectedNode() {
@@ -1304,8 +1167,8 @@ export default function Home() {
         >
           <div className="pointer-events-none absolute inset-0 opacity-45 [background-image:radial-gradient(circle_at_center,#000_1.4px,transparent_1.5px)] [background-size:98px_78px]" />
 
-          <div className="relative min-h-0 overflow-hidden">
-            <div className="absolute right-0 top-0 z-30 flex rounded-lg border border-neutral-300 bg-white p-1 text-xs shadow-sm">
+          <div data-web-interaction-box className="relative min-h-0 overflow-hidden rounded-md border border-neutral-400" aria-label="Interactive word web">
+            <div className="absolute right-2 top-2 z-30 flex rounded-lg border border-neutral-300 bg-white p-1 text-xs shadow-sm">
               <button type="button" onClick={() => setViewMode("web")} className={`rounded px-3 py-1.5 ${viewMode === "web" ? "bg-black text-white" : "hover:bg-neutral-100"}`}>Web view</button>
               <button type="button" onClick={() => setViewMode("list")} className={`rounded px-3 py-1.5 ${viewMode === "list" ? "bg-black text-white" : "hover:bg-neutral-100"}`}>List view</button>
             </div>
@@ -1313,7 +1176,7 @@ export default function Home() {
               ref={graphContainerRef}
               data-wordsmith-graph
               aria-hidden={viewMode !== "web"}
-              className={`absolute inset-0 h-full w-full ${viewMode === "web" ? "" : "invisible"}`}
+              className={`absolute inset-0 h-full w-full touch-none ${viewMode === "web" ? "" : "invisible"}`}
             />
 
             {viewMode === "list" ? (
@@ -1329,7 +1192,7 @@ export default function Home() {
               </div>
             ) : null}
 
-            <div className="absolute bottom-0 left-0 z-20 flex flex-col overflow-hidden rounded-lg border border-neutral-300 bg-white/85 shadow-sm">
+            <div className="absolute bottom-2 left-2 z-20 flex flex-col overflow-hidden rounded-lg border border-neutral-300 bg-white/85 shadow-sm">
               <button
                 type="button"
                 onClick={zoomIn}

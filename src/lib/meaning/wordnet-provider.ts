@@ -59,6 +59,7 @@ export class WordnetProvider implements LexicalProvider {
   async findRelations(word: string, options: Parameters<LexicalProvider["findRelations"]>[1]) {
     const senses = await this.findSenses(word);
     const chosen = options.senseId ? senses.filter(s => s.id === options.senseId) : senses;
+    if (options.relations.length === 1 && options.relations[0] === "antonym") return this.opposites(word, chosen, options.limit);
     const candidates: LexicalCandidate[] = [];
     for (const sense of chosen) {
       for (const entry of usage.filter(entry => entry.query === word && sense.definition.toLowerCase().includes(entry.senseContains.toLowerCase()))) candidates.push({ text: entry.text, relationship: entry.relationship as MeaningRelationship, definition: entry.definition, explanation: entry.explanation, partOfSpeech: sense.partOfSpeech, senseId: sense.id, confidence: 1, quality: .98, sources: ["phrase-library"] });
@@ -76,5 +77,39 @@ export class WordnetProvider implements LexicalProvider {
       }
     }
     return candidates.slice(0, options.limit).map(candidate => ({ ...candidate, quality: candidate.quality ?? (candidate.text.includes(" ") ? .85 : Math.min(.98, .35 + Math.log10(Math.max(1, counts.get(candidate.text) ?? 0)) * .15)) }));
+  }
+
+  private async opposites(word: string, senses: SemanticSense[], limit: number) {
+    const results: LexicalCandidate[] = [];
+    for (const sense of senses) {
+      const root = await readSynset(sense.id);
+      const anchors = [{ synset: root, via: word, direct: true }];
+      // Satellite adjectives inherit opposition from their exact head synset.
+      // Never look up the head word afresh: that would introduce other senses.
+      for (const pointer of root.pointers.filter(p => p.symbol === "&")) {
+        const synset = await readSynset(`${pointer.pos}:${pointer.offset}`);
+        if (synset.pos === "a") anchors.push({ synset, via: synset.words[0], direct: false });
+      }
+      // WordNet also defines some heads as a plain disjunction of synonyms,
+      // e.g. "perfect or complete or pure". Use only adjective head senses.
+      if (/^[a-z-]+(?: or [a-z-]+)+$/.test(root.definition)) {
+        for (const glossWord of root.definition.split(" or ")) {
+          const glossSenses = await this.findSenses(glossWord);
+          const first = glossSenses.find(s => s.partOfSpeech === sense.partOfSpeech);
+          if (first) anchors.push({ synset: await readSynset(first.id), via: glossWord, direct: false });
+        }
+      }
+      for (const anchor of anchors) for (const pointer of anchor.synset.pointers.filter(p => p.symbol === "!")) {
+        if (anchor.direct && pointer.source && anchor.synset.words[pointer.source - 1] !== word) continue;
+        const opposite = await readSynset(`${pointer.pos}:${pointer.offset}`);
+        const family = [opposite];
+        for (const similar of opposite.pointers.filter(p => p.symbol === "&")) family.push(await readSynset(`${similar.pos}:${similar.offset}`));
+        for (const member of family) for (const text of member.words) {
+          if (text === word) continue;
+          results.push({ text, relationship: "antonym", definition: member.definition, example: member.examples[0], partOfSpeech: posNames[member.pos], senseId: sense.id, oppositeGroup: opposite.id, confidence: member === opposite ? 1 : .9, quality: .95, sources: ["wordnet"], explanation: `Opposite of “${word}” in the sense “${sense.definition}”: ${anchor.via} ↔ ${opposite.words[0]}${member === opposite ? "" : ` → ${text} (${member.definition})`}.` });
+        }
+      }
+    }
+    return results.slice(0, limit);
   }
 }

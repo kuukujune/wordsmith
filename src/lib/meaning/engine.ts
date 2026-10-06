@@ -8,6 +8,7 @@ import { retrieveCandidates } from "./candidate-provider";
 import { classifyMeaning, modeRelationships } from "./classification";
 import { scoreMeaning, calibratedSimilarity } from "./semantic-scoring";
 import { diversityRank } from "./diversity-ranking";
+import { antonymWeb } from "./antonym-web";
 import { wordWeb } from "./word-web";
 import { MeaningError, normalizeMeaningText, validateMeaningRequest } from "./normalize";
 import concepts from "../../data/meaning/concepts.json";
@@ -30,6 +31,15 @@ export async function searchMeaning(value: MeaningSearchRequest, dependencies: E
   let analysis;
   try { analysis = await analyzeInput(request, lexical, embedding); }
   catch (error) { if (error instanceof MeaningError) throw error; throw new MeaningError("Lexical data is unavailable. Reinstall dependencies.", 503); }
+  if (request.mode === "antonym") {
+    // Always resolve opposition against the master center, never invert a child.
+    const rootRequest = request.originalCenter ? { ...request, query: request.originalCenter, senseId: request.originalSenseId, context: "", originalCenter: undefined } : request;
+    const rootAnalysis = request.originalCenter ? await analyzeInput(rootRequest, lexical, embedding) : analysis;
+    const web = await antonymWeb(rootAnalysis, rootRequest, lexical);
+    const response: MeaningSearchResponse = { center: { text: rootRequest.query, inputKind: rootAnalysis.inputKind, analysis: rootAnalysis }, mode: "antonym", results: web.results, diagnostics: { candidateCount: web.candidateCount, scoredCount: web.results.length, returnedCount: web.results.length, cacheHit: false, durationMs: performance.now() - started, embeddingProvider: "lexical antonyms", warnings: web.warnings } };
+    if (!request.originalCenter && !dependencies.lexical && !dependencies.embedding) cache.set(key, response);
+    return response;
+  }
   if (analysis.inputKind === "word" && ["auto", "synonym"].includes(request.mode)) {
     const web = await wordWeb(analysis, request, lexical, embedding);
     if (request.originalCenter) {
