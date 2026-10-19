@@ -38,91 +38,105 @@ body {
   }
 }
 
+
+.wordsmith-mobile-types,
+.wordsmith-settings-trigger,
+.wordsmith-selection-bar {
+  display: none;
+}
+
+.wordsmith-settings-dialog,
+.wordsmith-details-dialog {
+  position: fixed;
+  color: #171717;
+  background: #f9f8f4;
+  border: 1px solid #d4d4d4;
+  padding: 0;
+  overscroll-behavior: contain;
+}
+
+.wordsmith-settings-dialog::backdrop,
+.wordsmith-details-dialog::backdrop {
+  background: rgb(0 0 0 / 28%);
+}
+
+.wordsmith-settings-dialog {
+  inset: auto 0 0;
+  margin: 0 auto;
+  width: min(100%, 520px);
+  max-width: 100%;
+  max-height: 85dvh;
+  border-radius: 20px 20px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.wordsmith-details-dialog {
+  inset: 0 0 0 auto;
+  margin: 0 0 0 auto;
+  width: min(92vw, 420px);
+  max-width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 16px 0 0 16px;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: -12px 0 40px rgb(0 0 0 / 12%);
+}
+
+.wordsmith-details-dialog[open] { animation: wordsmith-slide-in 180ms ease-out; }
+@keyframes wordsmith-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wordsmith-details-dialog[open] { animation: none; }
+}
+
+.wordsmith-details-dialog button[aria-label="Close node details"] {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #d4d4d4;
+  border-radius: 8px;
+}
+
 @media (max-width: 900px) {
   .wordsmith-shell {
-    --wordsmith-shell-rows: 62px minmax(0, 1fr) 58px;
-    --wordsmith-workspace-columns: minmax(0, 1fr);
-    --wordsmith-workspace-rows: 152px minmax(0, 1fr) 190px;
-    --wordsmith-graph-rows: minmax(0, 1fr) 34px 52px;
+    grid-template-rows: calc(54px + env(safe-area-inset-top)) minmax(0, 1fr) !important;
   }
-
   .wordsmith-header {
-    padding-left: 14px;
-    padding-right: 14px;
+    padding: env(safe-area-inset-top) 14px 0;
   }
-
-  .wordsmith-header > div:first-child {
-    min-width: 0;
-  }
-
-  .wordsmith-header h1 {
-    font-size: 1.45rem;
-  }
-
-  .wordsmith-header p {
-    display: none;
-  }
-
-  .wordsmith-header > div:last-child {
-    min-width: 0;
-    gap: 14px;
-  }
-
+  .wordsmith-header > div:first-child { min-width: 0; }
+  .wordsmith-header h1 { font-size: 1.3rem; }
+  .wordsmith-header p,
+  .wordsmith-header > nav,
+  .wordsmith-header [aria-label="Wordsmith guest profile"] { display: none; }
+  .wordsmith-header > div:last-child { min-width: 0; }
+  .wordsmith-header > div:last-child > button { display: block; min-height: 40px; }
+  #mobile-navigation { display: grid; }
   .wordsmith-workspace {
-    gap: 8px;
-    padding: 8px 10px;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    gap: 0;
+    padding: 8px 10px max(10px, env(safe-area-inset-bottom));
   }
-
-  .wordsmith-settings-panel {
-    padding: 12px;
+  .wordsmith-settings-panel,
+  .wordsmith-details-panel,
+  .wordsmith-footer,
+  .wordsmith-desktop-types { display: none; }
+  .wordsmith-graph-panel {
+    grid-template-rows: minmax(0, 1fr) auto auto !important;
   }
-
-  .wordsmith-settings-panel > div:nth-of-type(2),
-  .wordsmith-settings-panel .short-screen-hide {
-    display: none !important;
+  .wordsmith-mobile-types,
+  .wordsmith-selection-bar { display: flex; }
+  .wordsmith-settings-trigger { display: block; }
+  .wordsmith-search-form {
+    height: 56px;
+    padding: 4px 5px 4px 8px;
+    gap: 5px;
   }
-
-  .wordsmith-settings-panel > div:first-of-type {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-  }
-
-  .wordsmith-settings-panel button {
-    padding: 7px 9px;
-    font-size: 0.82rem;
-  }
-
-  .wordsmith-graph-panel form {
-    height: 48px;
-  }
-
-  .wordsmith-graph-panel form input {
-    font-size: 1rem;
-  }
-
-  .wordsmith-details-panel {
-    padding: 14px;
-  }
-
-  .wordsmith-details-panel h3 {
-    font-size: 1.25rem;
-  }
-
-  .wordsmith-details-panel > div:nth-of-type(2) {
-    margin-top: 10px;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 9px;
-  }
-
-  .wordsmith-footer {
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding: 8px 10px;
-    font-size: 0.78rem;
-  }
-
-  .wordsmith-footer > p {
-    display: none;
-  }
+  .wordsmith-search-form input { font-size: 16px; padding: 0 3px; }
+  .wordsmith-search-form button[type="submit"] { min-height: 44px; padding: 8px 12px; }
+  .wordsmith-search-form:focus-within { border-color: #171717; }
+  .wordsmith-details-dialog .short-screen-hide { display: block !important; }
 }

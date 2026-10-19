@@ -48,14 +48,14 @@ const totalGraphNodeLimit = 50;
 const relatedNodeLimit = totalGraphNodeLimit - 1;
 const compactLayoutBreakpoint = 900;
 const desktopShellRows = "70px minmax(0, 1fr) 86px";
-const compactShellRows = "62px minmax(0, 1fr) 58px";
+const compactShellRows = "54px minmax(0, 1fr)";
 const desktopWorkspaceColumns =
   "216px minmax(0, 1fr) clamp(300px, 22vw, 360px)";
 const compactWorkspaceColumns = "minmax(0, 1fr)";
 const desktopWorkspaceRows = "minmax(0, 1fr)";
-const compactWorkspaceRows = "152px minmax(0, 1fr) 190px";
+const compactWorkspaceRows = "minmax(0, 1fr)";
 const desktopGraphRows = "minmax(0, 1fr) 42px 58px";
-const compactGraphRows = "minmax(0, 1fr) 34px 52px";
+const compactGraphRows = "minmax(0, 1fr) auto auto";
 
 const meaningModeOptions: Array<{ value: MeaningMode; label: string }> = [
   { value: "synonym", label: "Similar meaning" },
@@ -295,6 +295,8 @@ export default function Home() {
   const [isCompactLayout, setIsCompactLayout] = useState(false);
   const [viewMode, setViewMode] = useState<"web" | "list">("web");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const settingsDialogRef = useRef<HTMLDialogElement>(null);
+  const detailsDialogRef = useRef<HTMLDialogElement>(null);
   const [showMoreRelations, setShowMoreRelations] = useState(false);
   const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null);
   const [expandedRhymeKeys, setExpandedRhymeKeys] = useState<Set<string>>(() => new Set());
@@ -364,9 +366,9 @@ export default function Home() {
   const workspaceRows = isCompactLayout
     ? compactWorkspaceRows
     : desktopWorkspaceRows;
-  const graphRows = relationType === "rhymes" || relationType === "meaning"
-    ? isCompactLayout ? "minmax(0, 1fr) 68px 52px" : "minmax(0, 1fr) 78px 58px"
-    : isCompactLayout ? compactGraphRows : desktopGraphRows;
+  const graphRows = isCompactLayout ? compactGraphRows
+    : relationType === "rhymes" || relationType === "meaning"
+      ? "minmax(0, 1fr) 78px 58px" : desktopGraphRows;
   const footerColumns = isCompactLayout
     ? "minmax(0, 1fr) auto"
     : workspaceColumns;
@@ -429,7 +431,6 @@ export default function Home() {
         setSearchTerm(graph.center);
         setRelationType(graph.relationType);
         setLiveGraph(graph);
-        setViewMode("web");
         meaningExpansionKeys.current.clear();
         if (graph.meaningMode) setMeaningMode(meaningCategory(graph.meaningMode));
         setExpandedRhymeKeys(new Set());
@@ -618,6 +619,10 @@ export default function Home() {
   useEffect(() => {
     function updateLayoutMode() {
       setIsCompactLayout(window.innerWidth <= compactLayoutBreakpoint);
+      if (window.innerWidth > compactLayoutBreakpoint) {
+        settingsDialogRef.current?.close();
+        detailsDialogRef.current?.close();
+      }
     }
 
     updateLayoutMode();
@@ -1032,6 +1037,153 @@ export default function Home() {
     }
   }
 
+  const nodeDetails = (<>
+
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-widest">
+              Node Details
+            </h2>
+
+            <button
+              type="button"
+              aria-label="Close node details"
+              onClick={() => { if (detailsDialogRef.current?.open) detailsDialogRef.current.close(); else setSelectedNode(null); }}
+              className="text-xl text-neutral-500 hover:text-black"
+            >
+              x
+            </button>
+          </div>
+
+          <h3 className="break-words text-2xl font-bold leading-tight">
+            {detailNode?.label ?? centerPhrase}
+          </h3>
+
+          {recenterMessage && !selectedNode ? (
+            <p className="mt-2 text-xs text-neutral-500">{recenterMessage}</p>
+          ) : null}
+
+          <div className="mt-5 space-y-4 text-sm">
+            <div>
+              <p className="mb-1 font-semibold">Relation</p>
+              <span className="inline-flex rounded-md bg-neutral-200 px-2 py-1 text-xs">
+                {selectedNode ? selectedRelation.label : "Core / Center"}
+              </span>
+            </div>
+
+            {detailNode?.definition ? <div>
+              <p className="mb-1 font-semibold">Definition</p>
+              <p className="text-neutral-700">{detailNode.definition}</p>
+              {detailNode.definitions && detailNode.definitions.length > 1 ? <ul className="mt-2 list-inside list-disc text-xs text-neutral-600">{detailNode.definitions.slice(1).map((definition) => <li key={definition}>{definition}</li>)}</ul> : null}
+            </div> : null}
+
+            {detailNode?.example ? <div>
+              <p className="mb-1 font-semibold">Example</p>
+              <p className="text-neutral-700">{detailNode.example}</p>
+            </div> : null}
+
+            <div className="wordsmith-detail-meta-grid grid grid-cols-2 gap-3">
+              {detailNode?.tone ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Tone
+                </p>
+                <span className="inline-flex max-w-full rounded-md bg-neutral-200 px-2 py-1 text-xs">
+                  {detailNode.tone}
+                </span>
+              </div> : null}
+
+              {detailNode?.partOfSpeech ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Part of Speech
+                </p>
+                <p className="break-words text-neutral-700">
+                  {detailNode.partOfSpeech}
+                </p>
+              </div> : null}
+
+              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Source
+                </p>
+                <p className="break-words text-neutral-700">
+                  {detailNode?.source ?? graphSourceLabel}
+                </p>
+              </div>
+
+              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Strength
+                </p>
+                <p className="break-words text-neutral-700">
+                  {selectedNode ? detailNode?.relevance ?? "Exploratory" : "Center"}
+                </p>
+              </div>
+              {detailNode?.pronunciation ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Pronunciation</p><p className="break-words text-neutral-700">{detailNode.pronunciation}</p></div> : null}
+              {detailNode?.syllableCount ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Syllables</p><p className="text-neutral-700">{detailNode.syllableCount}</p></div> : null}
+            </div>
+            {detailNode?.meaningAnalysis && detailNode.meaningAnalysis.possibleSenses.length > 1 ? <div className="space-y-2"><p className="text-xs font-semibold">Meaning / sense</p><button type="button" aria-pressed={!liveGraph?.selectedSenseId} className="block w-full rounded border p-2 text-left text-xs" onClick={() => void performSearch(centerPhrase, "meaning")}>All senses</button>{detailNode.meaningAnalysis.possibleSenses.map(sense => <button type="button" key={sense.id} aria-pressed={liveGraph?.selectedSenseId === sense.id} className={`block w-full rounded border p-2 text-left text-xs ${liveGraph?.selectedSenseId === sense.id ? "border-black bg-neutral-200" : "border-neutral-200"}`} onClick={() => void performSearch(centerPhrase, "meaning", { senseId: sense.id })}>{sense.definition}</button>)}</div> : null}
+            {detailNode?.meaningData ? <div className="space-y-2 rounded-lg border border-neutral-200 p-3 text-xs">
+              <p className="font-semibold capitalize">{detailNode.meaningData.relationship.replaceAll("-", " ")} · {detailNode.strength}/100</p>
+              <p>{detailNode.meaningData.explanation}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <p>Semantic: {Math.round(detailNode.meaningData.scoreBreakdown.embeddingSimilarity)}</p><p>Context: {Math.round(detailNode.meaningData.scoreBreakdown.contextualSimilarity)}</p>
+                <p>Tone: {Math.round(detailNode.meaningData.scoreBreakdown.toneSimilarity)}</p><p>Imagery: {Math.round(detailNode.meaningData.scoreBreakdown.imagerySimilarity)}</p>
+                {detailNode.meaningData.parentSimilarity !== undefined ? <p>Parent relevance: {detailNode.meaningData.parentSimilarity}</p> : null}
+                {detailNode.meaningData.centerSimilarity !== undefined ? <p>Centre relevance: {Math.round(detailNode.meaningData.centerSimilarity)}</p> : null}
+              </div>
+              {detailNode.meaningData.possibleSenseId ? <p>Sense: {liveGraph?.centerNode?.meaningAnalysis?.possibleSenses.find(s => s.id === detailNode.meaningData?.possibleSenseId)?.definition ?? detailNode.meaningData.possibleSenseId}</p> : null}
+            </div> : null}
+            {liveGraph?.warnings?.length ? <p role="status" className="text-xs text-amber-800">{liveGraph.warnings.join(" ")}</p> : null}
+            {detailNode?.rhymeData ? (
+              <div className="space-y-3 rounded-lg border border-neutral-200 bg-white/55 p-3">
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div><p className="font-semibold uppercase tracking-wide text-neutral-500">Rhyme type</p><p className="mt-1 capitalize">{detailNode.rhymeData.relationship.replaceAll("-", " ")}</p></div>
+                  <div><p className="font-semibold uppercase tracking-wide text-neutral-500">Rhyme score</p><p className="mt-1">{detailNode.strength}/100</p></div>
+                </div>
+                <div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Stress pattern</p><p className="mt-1 font-mono text-xs">{detailNode.rhymeData.stressPattern.join(" ")}</p></div>
+                <div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Rhyme tail</p><p className="mt-1 break-words font-mono text-xs">{detailNode.rhymeData.rhymeTail.join(" ")}</p></div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                  <p>Ending: {Math.round(detailNode.rhymeData.scoreBreakdown.endingSimilarity * 100)}</p>
+                  <p>Multisyllabic: {Math.round(detailNode.rhymeData.scoreBreakdown.multisyllabic * 100)}</p>
+                  <p>Assonance: {Math.round(detailNode.rhymeData.scoreBreakdown.assonance * 100)}</p>
+                  <p>Consonance: {Math.round(detailNode.rhymeData.scoreBreakdown.consonance * 100)}</p>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-5 border-t border-neutral-200 pt-4">
+            <div className="grid gap-2">
+              <button
+                type="button"
+                onClick={recenterSelectedNode}
+                disabled={!selectedNode || isSearching}
+                className="rounded-lg border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-300 disabled:bg-neutral-200 disabled:text-neutral-500"
+              >
+                Re-center
+              </button>
+
+              <button
+                type="button"
+                onClick={saveSelectedNode}
+                disabled={!selectedNode}
+                className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-400"
+              >
+                {isSelectedNodeSaved ? "Saved" : "Save"}
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-neutral-500">
+              {selectedNode
+                ? expandingNodeId === selectedNode.id || expandingMeaningNodes.has(selectedNode.id)
+                  ? "Expanding this branch..."
+                  : saveMessage || ((relationType === "rhymes" || relationType === "meaning") ? "This node expands automatically when selected." : "Use Re-center to explore from this node.")
+                : recenterMessage
+                  ? "The new live word web is ready."
+                : "Select a graph node to enable actions."}
+            </p>
+          </div>
+          </>);
+
   return (
     <main
       className="wordsmith-shell fixed inset-0 grid overflow-hidden bg-[#f9f8f4] text-black"
@@ -1176,9 +1328,8 @@ export default function Home() {
           <div className="pointer-events-none absolute inset-0 opacity-45 [background-image:radial-gradient(circle_at_center,#000_1.4px,transparent_1.5px)] [background-size:98px_78px]" />
 
           <div data-web-interaction-box className="relative min-h-0 overflow-hidden rounded-md border border-neutral-400" aria-label="Interactive word web">
-            <div className="absolute right-2 top-2 z-30 flex rounded-lg border border-neutral-300 bg-white p-1 text-xs shadow-sm">
-              <button type="button" onClick={() => setViewMode("web")} className={`rounded px-3 py-1.5 ${viewMode === "web" ? "bg-black text-white" : "hover:bg-neutral-100"}`}>Web view</button>
-              <button type="button" onClick={() => setViewMode("list")} className={`rounded px-3 py-1.5 ${viewMode === "list" ? "bg-black text-white" : "hover:bg-neutral-100"}`}>List view</button>
+            <div className="absolute right-2 top-2 z-30">
+              <button type="button" aria-label={`View: ${viewMode === "web" ? "web" : "list"}. Switch to ${viewMode === "web" ? "list" : "web"} view`} onClick={() => setViewMode(mode => mode === "web" ? "list" : "web")} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold shadow-sm">View <span className="ml-1 font-normal text-neutral-500">{viewMode === "web" ? "List" : "Web"}</span></button>
             </div>
             <div
               ref={graphContainerRef}
@@ -1188,10 +1339,10 @@ export default function Home() {
             />
 
             {viewMode === "list" ? (
-              <div className="absolute inset-0 overflow-y-auto px-2 pb-4 pt-12" role="list" aria-label={`Results related to ${centerPhrase}`}>
+              <div className="absolute inset-0 overflow-y-auto px-2 pb-24 pt-16" role="list" aria-label={`Results related to ${centerPhrase}`}>
                 {currentNodes.length > 0 ? currentNodes.map((node) => (
                   <div key={node.id} role="listitem">
-                  <button type="button" onClick={() => setSelectedNode(node)} className="mb-2 grid w-full grid-cols-[minmax(0,1fr)_auto] gap-4 rounded-lg border border-neutral-200 bg-white/90 p-3 text-left hover:border-neutral-400 focus:outline-2 focus:outline-black">
+                  <button type="button" aria-pressed={selectedNode?.id === node.id} onClick={() => setSelectedNode(node)} className="mb-2 grid w-full grid-cols-[minmax(0,1fr)_auto] gap-4 rounded-lg border border-neutral-200 bg-white/90 p-3 text-left hover:border-neutral-400 aria-pressed:border-black aria-pressed:bg-neutral-100 focus:outline-2 focus:outline-black">
                     <span><span className="block font-semibold">{node.label}</span><span className="line-clamp-2 text-xs text-neutral-600">{node.definition ?? node.relationshipExplanation ?? "No definition available."}</span></span>
                     <span className="text-xs text-neutral-500">{node.relevance ?? "Exploratory"}</span>
                   </button>
@@ -1200,7 +1351,7 @@ export default function Home() {
               </div>
             ) : null}
 
-            <div className="absolute bottom-2 left-2 z-20 flex flex-col overflow-hidden rounded-lg border border-neutral-300 bg-white/85 shadow-sm">
+            <div className={`absolute bottom-2 left-2 z-20 ${viewMode === "web" ? "flex" : "hidden"} flex-col overflow-hidden rounded-lg border border-neutral-300 bg-white/85 shadow-sm`}>
               <button
                 type="button"
                 onClick={zoomIn}
@@ -1228,9 +1379,20 @@ export default function Home() {
                 []
               </button>
             </div>
+            <div className="wordsmith-selection-bar absolute bottom-3 left-14 right-3 z-20 flex min-h-12 items-center gap-3 rounded-lg border border-neutral-200 bg-white/95 px-3 py-2 shadow-sm">
+              <p className="min-w-0 flex-1 truncate text-sm" aria-live="polite">{selectedNode ? <><span className="block text-[10px] uppercase tracking-wider text-neutral-500">Selected</span><strong>{selectedNode.label}</strong></> : isShowingLiveGraph ? centerPhrase : "Tap a word to explore"}</p>
+              <button type="button" disabled={!detailNode} onClick={() => detailsDialogRef.current?.showModal()} className="min-h-11 shrink-0 rounded-md bg-black px-3 text-sm font-semibold text-white disabled:bg-neutral-200 disabled:text-neutral-500">More info</button>
+            </div>
           </div>
 
-          <div className="flex min-h-0 flex-col items-center justify-end gap-1 overflow-hidden">
+          <div className="wordsmith-mobile-types items-center gap-2 pt-2">
+            <label htmlFor="mobile-relation" className="text-xs text-neutral-500">Search type</label>
+            <select id="mobile-relation" value={relationType} onChange={event => chooseRelationType(event.target.value as RelationType)} className="min-h-11 min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 text-sm font-semibold">
+              {relationOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+            {relationType === "meaning" || relationType === "rhymes" ? <button type="button" onClick={() => settingsDialogRef.current?.showModal()} className="min-h-11 max-w-[42%] truncate rounded-lg border border-neutral-300 bg-white px-3 text-xs">{relationType === "meaning" ? meaningModeOptions.find(option => option.value === meaningMode)?.label : rhymeModeOptions.find(option => option.value === rhymeMode)?.label}</button> : null}
+          </div>
+          <div className="wordsmith-desktop-types flex min-h-0 flex-col items-center justify-end gap-1 overflow-hidden">
             {relationType === "meaning" ? (
               <div className="flex max-w-full flex-nowrap gap-1 overflow-x-auto" aria-label="Meaning mode">
                 {meaningModeOptions.map(option => <button key={option.value} type="button" aria-pressed={meaningMode === option.value} className={`whitespace-nowrap rounded-md border px-2 py-1 text-[11px] ${meaningMode === option.value ? "border-black bg-neutral-800 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100"}`} onClick={() => { setMeaningMode(option.value); if (liveGraph) void performSearch(centerPhrase, "meaning", { meaningModeOverride: option.value, senseId: liveGraph.selectedSenseId }); }}>{option.label}</button>)}
@@ -1277,7 +1439,7 @@ export default function Home() {
 
           <form
             onSubmit={handleSubmit}
-            className="mx-auto mt-2 flex h-[54px] w-full max-w-[754px] items-center gap-3 rounded-xl border border-neutral-300 bg-white px-4 shadow-sm"
+            className="wordsmith-search-form mx-auto mt-2 flex h-[54px] w-full max-w-[754px] items-center gap-3 rounded-xl border border-neutral-300 bg-white px-4 shadow-sm"
           >
             <label htmlFor="word-search" className="sr-only">
               Enter a word or phrase
@@ -1298,156 +1460,41 @@ export default function Home() {
             >
               {isSearching ? "Searching" : "Search"}
             </button>
+            <button type="button" aria-label="Search settings" aria-haspopup="dialog" onClick={() => settingsDialogRef.current?.showModal()} className="wordsmith-settings-trigger min-h-11 min-w-11 rounded-lg border border-neutral-300 text-2xl leading-none">…</button>
             <p className="sr-only" aria-live="polite">{isSearching ? "Finding related words and building connections." : searchError}</p>
           </form>
           {searchError ? <p className="absolute bottom-0 left-1/2 z-30 -translate-x-1/2 rounded bg-red-50 px-3 py-1 text-xs text-red-800" role="alert">{searchError} <button type="button" className="font-semibold underline" onClick={() => void performSearch(searchTerm || centerPhrase, relationType)}>Retry</button></p> : null}
         </section>
 
-        <aside className="wordsmith-details-panel min-h-0 overflow-y-auto rounded-lg border border-neutral-200 bg-white/70 p-5 shadow-sm">
-          <div className="mb-6 flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-widest">
-              Node Details
-            </h2>
-
-            <button
-              type="button"
-              onClick={() => setSelectedNode(null)}
-              className="text-xl text-neutral-500 hover:text-black"
-            >
-              x
-            </button>
-          </div>
-
-          <h3 className="break-words text-2xl font-bold leading-tight">
-            {detailNode?.label ?? centerPhrase}
-          </h3>
-
-          {recenterMessage && !selectedNode ? (
-            <p className="mt-2 text-xs text-neutral-500">{recenterMessage}</p>
-          ) : null}
-
-          <div className="mt-5 space-y-4 text-sm">
-            <div>
-              <p className="mb-1 font-semibold">Relation</p>
-              <span className="inline-flex rounded-md bg-neutral-200 px-2 py-1 text-xs">
-                {selectedNode ? selectedRelation.label : "Core / Center"}
-              </span>
-            </div>
-
-            {detailNode?.definition ? <div>
-              <p className="mb-1 font-semibold">Definition</p>
-              <p className="text-neutral-700">{detailNode.definition}</p>
-              {detailNode.definitions && detailNode.definitions.length > 1 ? <ul className="mt-2 list-inside list-disc text-xs text-neutral-600">{detailNode.definitions.slice(1, 3).map((definition) => <li key={definition}>{definition}</li>)}</ul> : null}
-            </div> : null}
-
-            {detailNode?.example ? <div>
-              <p className="mb-1 font-semibold">Example</p>
-              <p className="text-neutral-700">{detailNode.example}</p>
-            </div> : null}
-
-            <div className="wordsmith-detail-meta-grid grid grid-cols-2 gap-3">
-              {detailNode?.tone ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                  Tone
-                </p>
-                <span className="inline-flex max-w-full rounded-md bg-neutral-200 px-2 py-1 text-xs">
-                  {detailNode.tone}
-                </span>
-              </div> : null}
-
-              {detailNode?.partOfSpeech ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                  Part of Speech
-                </p>
-                <p className="truncate text-neutral-700">
-                  {detailNode.partOfSpeech}
-                </p>
-              </div> : null}
-
-              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                  Source
-                </p>
-                <p className="truncate text-neutral-700">
-                  {detailNode?.source ?? graphSourceLabel}
-                </p>
-              </div>
-
-              <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                  Strength
-                </p>
-                <p className="truncate text-neutral-700">
-                  {selectedNode ? detailNode?.relevance ?? "Exploratory" : "Center"}
-                </p>
-              </div>
-              {detailNode?.pronunciation ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Pronunciation</p><p className="truncate text-neutral-700">{detailNode.pronunciation}</p></div> : null}
-              {detailNode?.syllableCount ? <div className="min-w-0 rounded-md border border-neutral-200 bg-white/45 p-2"><p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Syllables</p><p className="text-neutral-700">{detailNode.syllableCount}</p></div> : null}
-            </div>
-            {detailNode?.meaningAnalysis && detailNode.meaningAnalysis.possibleSenses.length > 1 ? <div className="space-y-2"><p className="text-xs font-semibold">Meaning / sense</p><button type="button" aria-pressed={!liveGraph?.selectedSenseId} className="block w-full rounded border p-2 text-left text-xs" onClick={() => void performSearch(centerPhrase, "meaning")}>All senses</button>{detailNode.meaningAnalysis.possibleSenses.map(sense => <button type="button" key={sense.id} aria-pressed={liveGraph?.selectedSenseId === sense.id} className={`block w-full rounded border p-2 text-left text-xs ${liveGraph?.selectedSenseId === sense.id ? "border-black bg-neutral-200" : "border-neutral-200"}`} onClick={() => void performSearch(centerPhrase, "meaning", { senseId: sense.id })}>{sense.definition}</button>)}</div> : null}
-            {detailNode?.meaningData ? <div className="space-y-2 rounded-lg border border-neutral-200 p-3 text-xs">
-              <p className="font-semibold capitalize">{detailNode.meaningData.relationship.replaceAll("-", " ")} · {detailNode.strength}/100</p>
-              <p>{detailNode.meaningData.explanation}</p>
-              <div className="grid grid-cols-2 gap-2">
-                <p>Semantic: {Math.round(detailNode.meaningData.scoreBreakdown.embeddingSimilarity)}</p><p>Context: {Math.round(detailNode.meaningData.scoreBreakdown.contextualSimilarity)}</p>
-                <p>Tone: {Math.round(detailNode.meaningData.scoreBreakdown.toneSimilarity)}</p><p>Imagery: {Math.round(detailNode.meaningData.scoreBreakdown.imagerySimilarity)}</p>
-                {detailNode.meaningData.parentSimilarity !== undefined ? <p>Parent relevance: {detailNode.meaningData.parentSimilarity}</p> : null}
-                {detailNode.meaningData.centerSimilarity !== undefined ? <p>Centre relevance: {Math.round(detailNode.meaningData.centerSimilarity)}</p> : null}
-              </div>
-              {detailNode.meaningData.possibleSenseId ? <p>Sense: {liveGraph?.centerNode?.meaningAnalysis?.possibleSenses.find(s => s.id === detailNode.meaningData?.possibleSenseId)?.definition ?? detailNode.meaningData.possibleSenseId}</p> : null}
-            </div> : null}
-            {liveGraph?.warnings?.length ? <p role="status" className="text-xs text-amber-800">{liveGraph.warnings.join(" ")}</p> : null}
-            {detailNode?.rhymeData ? (
-              <div className="space-y-3 rounded-lg border border-neutral-200 bg-white/55 p-3">
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div><p className="font-semibold uppercase tracking-wide text-neutral-500">Rhyme type</p><p className="mt-1 capitalize">{detailNode.rhymeData.relationship.replaceAll("-", " ")}</p></div>
-                  <div><p className="font-semibold uppercase tracking-wide text-neutral-500">Rhyme score</p><p className="mt-1">{detailNode.strength}/100</p></div>
-                </div>
-                <div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Stress pattern</p><p className="mt-1 font-mono text-xs">{detailNode.rhymeData.stressPattern.join(" ")}</p></div>
-                <div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Rhyme tail</p><p className="mt-1 break-words font-mono text-xs">{detailNode.rhymeData.rhymeTail.join(" ")}</p></div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-                  <p>Ending: {Math.round(detailNode.rhymeData.scoreBreakdown.endingSimilarity * 100)}</p>
-                  <p>Multisyllabic: {Math.round(detailNode.rhymeData.scoreBreakdown.multisyllabic * 100)}</p>
-                  <p>Assonance: {Math.round(detailNode.rhymeData.scoreBreakdown.assonance * 100)}</p>
-                  <p>Consonance: {Math.round(detailNode.rhymeData.scoreBreakdown.consonance * 100)}</p>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="mt-5 border-t border-neutral-200 pt-4">
-            <div className="grid gap-2">
-              <button
-                type="button"
-                onClick={recenterSelectedNode}
-                disabled={!selectedNode || isSearching}
-                className="rounded-lg border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-300 disabled:bg-neutral-200 disabled:text-neutral-500"
-              >
-                Re-center
-              </button>
-
-              <button
-                type="button"
-                onClick={saveSelectedNode}
-                disabled={!selectedNode}
-                className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-400"
-              >
-                {isSelectedNodeSaved ? "Saved" : "Save"}
-              </button>
-            </div>
-
-            <p className="mt-3 text-xs text-neutral-500">
-              {selectedNode
-                ? expandingNodeId === selectedNode.id || expandingMeaningNodes.has(selectedNode.id)
-                  ? "Expanding this branch..."
-                  : saveMessage || ((relationType === "rhymes" || relationType === "meaning") ? "This node expands automatically when selected." : "Use Re-center to explore from this node.")
-                : recenterMessage
-                  ? "The new live word web is ready."
-                : "Select a graph node to enable actions."}
-            </p>
-          </div>
-        </aside>
+        <aside className="wordsmith-details-panel min-h-0 overflow-y-auto rounded-lg border border-neutral-200 bg-white/70 p-5 shadow-sm">{nodeDetails}</aside>
       </div>
+
+      <dialog ref={settingsDialogRef} aria-labelledby="search-settings-title" className="wordsmith-settings-dialog" onClick={event => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>
+        <div className="relative p-5">
+          <button type="button" aria-label="Close search settings" onClick={() => settingsDialogRef.current?.close()} className="absolute right-3 top-3 min-h-11 min-w-11 rounded-lg border border-neutral-200 text-xl">×</button>
+
+      <h2 id="search-settings-title" className="text-lg font-semibold">Search settings</h2>
+      <p className="mt-1 mb-5 text-sm text-neutral-500">Choose how to explore words and phrases.</p>
+      <label className="block text-xs font-bold uppercase tracking-widest" htmlFor="settings-relation">Search type</label>
+      <select id="settings-relation" value={relationType} onChange={event => chooseRelationType(event.target.value as RelationType)} className="mt-2 mb-5 w-full rounded-lg border border-neutral-300 bg-white p-3 text-base">
+        {relationOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      {relationType === "meaning" ? <fieldset className="mb-5"><legend className="mb-2 text-xs font-bold uppercase tracking-widest">Meaning filter</legend><div className="grid gap-2">
+        {meaningModeOptions.map(option => <button key={option.value} type="button" aria-pressed={meaningMode === option.value} className={`rounded-lg border p-3 text-left text-sm ${meaningMode === option.value ? "border-black bg-black text-white" : "border-neutral-300 bg-white"}`} onClick={() => { setMeaningMode(option.value); if (liveGraph) void performSearch(centerPhrase, "meaning", { meaningModeOverride: option.value, senseId: liveGraph.selectedSenseId }); }}>{option.label}</button>)}
+      </div></fieldset> : null}
+      {relationType === "rhymes" ? <fieldset className="mb-5"><legend className="mb-2 text-xs font-bold uppercase tracking-widest">Rhyme filter</legend><div className="grid grid-cols-2 gap-2">
+        {rhymeModeOptions.map(option => <button key={option.value} type="button" aria-pressed={rhymeMode === option.value} className={`rounded-lg border p-3 text-sm ${rhymeMode === option.value ? "border-black bg-black text-white" : "border-neutral-300 bg-white"}`} onClick={() => chooseRhymeMode(option.value)}>{option.label}</button>)}
+      </div></fieldset> : null}
+      {liveGraph?.centerNode?.meaningAnalysis && relationType === "meaning" ? <div className="mb-5"><label htmlFor="settings-sense" className="mb-2 block text-xs font-bold uppercase tracking-widest">Word sense</label><select id="settings-sense" className="w-full rounded-lg border border-neutral-300 bg-white p-3 text-base" value={liveGraph.selectedSenseId ?? ""} onChange={event => void performSearch(centerPhrase, "meaning", { senseId: event.target.value || undefined, meaningModeOverride: meaningMode })}><option value="">All senses</option>{liveGraph.centerNode.meaningAnalysis.possibleSenses.map(sense => <option key={sense.id} value={sense.id}>{sense.definition}</option>)}</select></div> : null}
+      <div className="border-t border-neutral-200 pt-4"><p className="mb-2 text-xs font-bold uppercase tracking-widest">Exploration trail</p><div className="flex gap-2"><button type="button" disabled={trailIndex <= 0} onClick={() => restoreTrailGraph(trailIndex - 1)} className="min-h-11 flex-1 rounded-lg border border-neutral-300 disabled:opacity-40">Back</button><button type="button" disabled={trailIndex < 0 || trailIndex >= explorationTrail.length - 1} onClick={() => restoreTrailGraph(trailIndex + 1)} className="min-h-11 flex-1 rounded-lg border border-neutral-300 disabled:opacity-40">Forward</button></div></div>
+      <div className="mt-4 flex gap-2"><button type="button" onClick={saveCurrentWeb} disabled={!isShowingLiveGraph} className="min-h-11 flex-1 rounded-lg border border-neutral-300 disabled:opacity-40">Save web</button><button type="button" onClick={() => void shareCurrentWeb()} disabled={!isShowingLiveGraph} className="min-h-11 flex-1 rounded-lg border border-neutral-300 disabled:opacity-40">Share</button></div>
+      <p className="mt-3 text-sm text-neutral-600" role="status">{webSaveMessage}</p>
+          <button type="button" onClick={() => settingsDialogRef.current?.close()} className="mt-3 min-h-12 w-full rounded-lg bg-black text-sm font-semibold text-white">Done</button>
+        </div>
+      </dialog>
+      <dialog ref={detailsDialogRef} aria-label="Node details" className="wordsmith-details-dialog" onClick={event => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>
+        <div className="min-h-full p-5">{nodeDetails}</div>
+      </dialog>
 
       <footer
         className="wordsmith-footer mx-auto grid h-full w-full max-w-[1540px] items-center gap-4 border-t border-neutral-200 px-6 py-3 text-sm"
